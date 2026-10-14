@@ -56,6 +56,7 @@ import {
   floatText,
   showBanner,
   showGameOverCard,
+  showPauseScreen,
   showStartScreen,
 } from './ui';
 
@@ -101,6 +102,7 @@ const KEY_DIRS: Partial<Record<string, Dir>> = {
   KeyS: 'down',
 };
 const RESTART_KEYS = ['KeyR', 'Enter', 'Space'];
+const PAUSE_KEY = 'Escape';
 
 interface SceneData {
   skipIntro?: boolean; // при «Ещё раз» стартовый экран не показываем
@@ -122,6 +124,7 @@ export class GameScene extends Phaser.Scene {
   private hintText!: Phaser.GameObjects.Text;
   private multiplierText!: Phaser.GameObjects.Text;
   private closeStartScreen: (() => void) | null = null;
+  private closePauseScreen: (() => void) | null = null;
 
   // Состояние партии. Phaser не пересоздаёт сцену при restart(),
   // поэтому всё это сбрасывается в resetState(), а не при объявлении.
@@ -146,6 +149,7 @@ export class GameScene extends Phaser.Scene {
   private bestScore = 0;
   private isStarted = false;
   private isGameOver = false;
+  private isPaused = false;
   private canRestart = false;
   private swipeStart: { x: number; y: number } | null = null;
 
@@ -179,7 +183,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number): void {
-    if (this.isStarted && !this.isGameOver) this.tick(Math.min(delta, MAX_FRAME_DELTA_MS));
+    // На паузе правила стоят: змейка, труба и таймер застывания не двигаются
+    if (this.isStarted && !this.isGameOver && !this.isPaused) this.tick(Math.min(delta, MAX_FRAME_DELTA_MS));
     this.render();
   }
 
@@ -224,9 +229,11 @@ export class GameScene extends Phaser.Scene {
     this.bestScore = loadBestScore();
     this.isStarted = false;
     this.isGameOver = false;
+    this.isPaused = false;
     this.canRestart = false;
     this.swipeStart = null;
     this.closeStartScreen = null;
+    this.closePauseScreen = null;
   }
 
   private startGame(): void {
@@ -235,6 +242,25 @@ export class GameScene extends Phaser.Scene {
     this.closeStartScreen?.();
     this.closeStartScreen = null;
     this.tweens.add({ targets: this.hintText, alpha: HINT_ALPHA, duration: 300 });
+  }
+
+  /** Esc: поставить на паузу или продолжить. На стартовом экране и после конца игры не действует. */
+  private togglePause(): void {
+    if (this.isPaused) this.resume();
+    else this.pause();
+  }
+
+  private pause(): void {
+    if (!this.isStarted || this.isGameOver || this.isPaused) return;
+    this.isPaused = true;
+    this.closePauseScreen = showPauseScreen(this, () => this.resume());
+  }
+
+  private resume(): void {
+    if (!this.isPaused) return;
+    this.isPaused = false;
+    this.closePauseScreen?.();
+    this.closePauseScreen = null;
   }
 
   // ---------- правила ----------
@@ -407,7 +433,7 @@ export class GameScene extends Phaser.Scene {
 
   /** Кладёт команду в буфер. Повтор и разворот назад игнорируются. */
   private queueDir(dir: Dir): void {
-    if (!this.isStarted || this.isGameOver) return;
+    if (!this.isStarted || this.isGameOver || this.isPaused) return;
     if (dir === 'down' && this.dir === 'down' && this.dirQueue.length === 0) {
       this.pressDownWhileFalling();
       return;
@@ -440,6 +466,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private handleKey(code: string): void {
+    if (code === PAUSE_KEY) {
+      this.togglePause();
+      return;
+    }
     if (!this.isStarted) {
       this.startGame(); // на стартовом экране — любая клавиша
       return;

@@ -159,13 +159,26 @@ export function showStartScreen(scene: Scene, bestScore: number, isTouch: boolea
   screen.add(button);
   pulse(scene, button);
 
-  const footer = [isTouch ? 'или коснись экрана' : 'или нажми любую клавишу'];
+  const footer = isTouch ? ['или коснись экрана'] : ['или нажми любую клавишу', 'Esc — пауза'];
   if (bestScore > 0) footer.push(`Рекорд: ${bestScore}`);
   screen.add(addText(scene, CENTER_X, buttonY + 80, footer.join('\n'), 18, MUTED_COLOR).setOrigin(0.5, 0).setAlign('center').setLineSpacing(8));
 
   return () => {
     scene.tweens.add({ targets: screen, alpha: 0, duration: 200, onComplete: () => screen.destroy() });
   };
+}
+
+/** Экран паузы. Возвращает функцию, которая его сразу убирает. */
+export function showPauseScreen(scene: Scene, onResume: () => void): () => void {
+  const screen = scene.add.container(0, 0).setDepth(DEPTH.overlay).setAlpha(0);
+  screen.add(addOverlay(scene, 0.7));
+  screen.add(addCard(scene, 480, 360, 300)); // карточка закрывает подсказку и змейку под ней
+  screen.add(addText(scene, CENTER_X, 400, 'Пауза', 56, TEXT_COLOR, true).setOrigin(0.5));
+  screen.add(addText(scene, CENTER_X, 452, 'Esc — продолжить', 20, MUTED_COLOR).setOrigin(0.5));
+  screen.add(addButton(scene, CENTER_X, 548, 'Продолжить', onResume));
+  scene.tweens.add({ targets: screen, alpha: 1, duration: 150 });
+
+  return () => screen.destroy();
 }
 
 export interface GameOverInfo {
