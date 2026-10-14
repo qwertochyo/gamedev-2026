@@ -25,11 +25,19 @@ export const STEP_MS_PER_LEVEL = 20;
 export const LINES_PER_LEVEL = 5;
 export const LINE_SCORE_BASE = 100; // очки = база × линии × множитель за изгибы
 export const MULTIPLIER_PER_TURN = 1; // каждый изгиб змейки добавляет к множителю: прямая ×1, Г ×2, Z ×3
-export const LOCK_DELAY_MS = 600; // сколько змейка стоит на опоре, прежде чем застыть
 export const DROP_STEP_MS = 40; // шаг ускоренного падения (↓, когда змейка и так ползёт вниз)
 
-// труба
-export const PIPE_STEP_MS = 450; // труба сдвигается на столбец за это время
+// Фазы. Правила в обеих одинаковые — со временем меняются только параметры.
+// Уровни (по линиям) меняют длину и скорость змейки, фазы (по игровому времени) — трубу и застывание.
+export const PHASE_2_AT_MS = 60_000; // фаза 2 через 60 с игрового времени (пауза не в счёт)
+
+export interface PhaseParams {
+  pipeStepMs: number; // за сколько труба сдвигается на столбец
+  lockDelayMs: number; // сколько змейка стоит на опоре, прежде чем застыть
+}
+
+const PHASE_1: PhaseParams = { pipeStepMs: 450, lockDelayMs: 600 };
+const PHASE_2: PhaseParams = { pipeStepMs: 280, lockDelayMs: 350 };
 
 export function createGrid(): Grid {
   return Array.from({ length: ROWS }, () => createEmptyRow());
@@ -107,6 +115,15 @@ export function levelForLines(lines: number): number {
 
 export function snakeLengthForLevel(level: number): number {
   return Math.min(START_LENGTH + level - 1, MAX_LENGTH);
+}
+
+/** Номер фазы по игровому времени: 1 или 2. */
+export function phaseForTime(playTimeMs: number): number {
+  return playTimeMs < PHASE_2_AT_MS ? 1 : 2;
+}
+
+export function phaseParams(phase: number): PhaseParams {
+  return phase === 1 ? PHASE_1 : PHASE_2;
 }
 
 export function stepMsForLevel(level: number): number {

@@ -85,11 +85,13 @@ export function floatText(scene: Scene, x: number, y: number, text: string, size
   });
 }
 
-/** Крупная надпись посреди стакана, например «Уровень 2». */
-export function showBanner(scene: Scene, title: string, subtitle: string): void {
-  const y = FIELD_Y + FIELD_H * 0.38;
+/** Крупная надпись посреди стакана, например «Уровень 2». Подпись может быть в несколько строк. */
+export function showBanner(scene: Scene, title: string, subtitle: string, y = FIELD_Y + FIELD_H * 0.38): void {
   const titleText = addText(scene, CENTER_X, y, title, 48, ACCENT_COLOR, true).setOrigin(0.5).setStroke(TEXT_STROKE, 8);
-  const subtitleText = addText(scene, CENTER_X, y + 48, subtitle, 22, TEXT_COLOR, true).setOrigin(0.5).setStroke(TEXT_STROKE, 6);
+  const subtitleText = addText(scene, CENTER_X, y + 32, subtitle, 22, TEXT_COLOR, true)
+    .setOrigin(0.5, 0)
+    .setAlign('center')
+    .setStroke(TEXT_STROKE, 6);
   const parts = [titleText, subtitleText];
   for (const part of parts) part.setDepth(DEPTH.banner).setAlpha(0).setScale(0.7);
 
@@ -159,7 +161,9 @@ export function showStartScreen(scene: Scene, bestScore: number, isTouch: boolea
   screen.add(button);
   pulse(scene, button);
 
-  const footer = isTouch ? ['или коснись экрана'] : ['или нажми любую клавишу', 'Esc — пауза'];
+  const footer = isTouch
+    ? ['или коснись экрана', 'Пауза — кнопка справа вверху']
+    : ['или нажми любую клавишу', 'Esc — пауза'];
   if (bestScore > 0) footer.push(`Рекорд: ${bestScore}`);
   screen.add(addText(scene, CENTER_X, buttonY + 80, footer.join('\n'), 18, MUTED_COLOR).setOrigin(0.5, 0).setAlign('center').setLineSpacing(8));
 
@@ -169,12 +173,13 @@ export function showStartScreen(scene: Scene, bestScore: number, isTouch: boolea
 }
 
 /** Экран паузы. Возвращает функцию, которая его сразу убирает. */
-export function showPauseScreen(scene: Scene, onResume: () => void): () => void {
+export function showPauseScreen(scene: Scene, isTouch: boolean, onResume: () => void): () => void {
   const screen = scene.add.container(0, 0).setDepth(DEPTH.overlay).setAlpha(0);
   screen.add(addOverlay(scene, 0.7));
   screen.add(addCard(scene, 480, 360, 300)); // карточка закрывает подсказку и змейку под ней
   screen.add(addText(scene, CENTER_X, 400, 'Пауза', 56, TEXT_COLOR, true).setOrigin(0.5));
-  screen.add(addText(scene, CENTER_X, 452, 'Esc — продолжить', 20, MUTED_COLOR).setOrigin(0.5));
+  const subtitle = isTouch ? 'Игровое время стоит' : 'Esc — продолжить';
+  screen.add(addText(scene, CENTER_X, 452, subtitle, 20, MUTED_COLOR).setOrigin(0.5));
   screen.add(addButton(scene, CENTER_X, 548, 'Продолжить', onResume));
   scene.tweens.add({ targets: screen, alpha: 1, duration: 150 });
 

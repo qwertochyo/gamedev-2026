@@ -3,9 +3,7 @@ import {
   COLS,
   DROP_STEP_MS,
   LINES_PER_LEVEL,
-  LOCK_DELAY_MS,
   MAX_LENGTH,
-  PIPE_STEP_MS,
   SPAWN_COL,
   clearFullRows,
   columnTop,
@@ -16,6 +14,8 @@ import {
   isOpposite,
   levelForLines,
   move,
+  phaseForTime,
+  phaseParams,
   scoreForLines,
   shapeMultiplier,
   snakeLengthForLevel,
@@ -23,6 +23,7 @@ import {
   type Cell,
   type Dir,
   type Grid,
+  type PhaseParams,
 } from './logic';
 import {
   CELL,
@@ -80,6 +81,7 @@ const VIBRATE_GAME_OVER_MS = 150;
 const HINT_ALPHA = 0.55;
 const POPUP_BOTTOM_MARGIN = 100; // «+600 ×3 за изгибы» не вылезает за дно стакана
 const BADGE_OFFSET_PX = 6; // значок «×3» сдвинут от головы наружу
+const PHASE_BANNER_Y = FIELD_Y + FIELD_H * 0.6; // ниже баннера уровня, чтобы они не наложились
 
 // верхняя панель
 const HUD_LABEL_Y = 12;
@@ -90,6 +92,13 @@ const LEVEL_BAR_COLOR = 0xfde047;
 const HUD_EMPTY_COLOR = 0x1e293b;
 const LENGTH_DOT = 9;
 const LENGTH_DOT_STEP = 12;
+const PAUSE_BUTTON_SIZE = 40; // кнопка паузы в правом верхнем углу — для телефона и мыши
+const PAUSE_HIT_W = 64; // зона нажатия больше самой кнопки, чтобы попадать пальцем
+const PAUSE_HIT_H = 72;
+const HUD_RIGHT = FIELD_X + FIELD_W - PAUSE_BUTTON_SIZE - 14; // рекорд стоит левее кнопки паузы
+const PAUSE_BORDER_COLOR = 0x334155;
+const PAUSE_ICON_COLOR = 0xcbd5e1;
+const STATUS_Y = 948; // строка «Фаза 1 · 0:42» под стаканом
 
 const BEST_SCORE_KEY = 'zmeytris-best-score';
 
@@ -123,6 +132,7 @@ export class GameScene extends Phaser.Scene {
   private linesText!: Phaser.GameObjects.Text;
   private hintText!: Phaser.GameObjects.Text;
   private multiplierText!: Phaser.GameObjects.Text;
+  private statusText!: Phaser.GameObjects.Text;
   private closeStartScreen: (() => void) | null = null;
   private closePauseScreen: (() => void) | null = null;
 
@@ -146,6 +156,8 @@ export class GameScene extends Phaser.Scene {
   private prevPipeCol = SPAWN_COL;
   private pipeDir = 1; // 1 — труба едет вправо, -1 — влево
   private pipeTimer = 0;
+  private playTimeMs = 0; // игровое время: идёт только в tick(), пауза и экраны не в счёт
+  private phase = 1;
   private bestScore = 0;
   private isStarted = false;
   private isGameOver = false;
@@ -172,6 +184,7 @@ export class GameScene extends Phaser.Scene {
     this.createHint();
     this.setupKeyboard();
     this.setupPointer();
+    this.setupAutoPause();
     this.spawnSnake();
 
     if (data.skipIntro) {
@@ -185,10 +198,16 @@ export class GameScene extends Phaser.Scene {
   update(_time: number, delta: number): void {
     // На паузе правила стоят: змейка, труба и таймер застывания не двигаются
     if (this.isStarted && !this.isGameOver && !this.isPaused) this.tick(Math.min(delta, MAX_FRAME_DELTA_MS));
+    this.updateStatus();
     this.render();
   }
 
+  /** Игровое время: вызывается только во время игры. Всё, что внутри, на паузе стоит. */
   private tick(dt: number): void {
+    this.playTimeMs += dt;
+    const phase = phaseForTime(this.playTimeMs);
+    if (phase !== this.phase) this.enterPhase(phase);
+
     this.updatePipe(dt);
 
     this.stepTimer += dt;
@@ -199,12 +218,23 @@ export class GameScene extends Phaser.Scene {
 
     if (this.isResting && !this.isGameOver) {
       this.restMs += dt;
-      if (this.restMs >= LOCK_DELAY_MS) this.freeze();
+      if (this.restMs >= this.params().lockDelayMs) this.freeze();
     }
   }
 
   private currentStepMs(): number {
     return this.isDropping ? DROP_STEP_MS : this.stepMs;
+  }
+
+  /** Параметры текущей фазы: скорость трубы и пауза перед застыванием. */
+  private params(): PhaseParams {
+    return phaseParams(this.phase);
+  }
+
+  /** Переход в новую фазу: правила те же, меняются только параметры из phaseParams(). */
+  private enterPhase(phase: number): void {
+    this.phase = phase;
+    showBanner(this, `Фаза ${phase}`, 'Труба ездит быстрее\nЗмейка застывает быстрее', PHASE_BANNER_Y);
   }
 
   private resetState(): void {
@@ -226,6 +256,8 @@ export class GameScene extends Phaser.Scene {
     this.prevPipeCol = SPAWN_COL;
     this.pipeDir = 1;
     this.pipeTimer = 0;
+    this.playTimeMs = 0;
+    this.phase = 1;
     this.bestScore = loadBestScore();
     this.isStarted = false;
     this.isGameOver = false;
@@ -253,7 +285,7 @@ export class GameScene extends Phaser.Scene {
   private pause(): void {
     if (!this.isStarted || this.isGameOver || this.isPaused) return;
     this.isPaused = true;
-    this.closePauseScreen = showPauseScreen(this, () => this.resume());
+    this.closePauseScreen = showPauseScreen(this, IS_TOUCH, () => this.resume());
   }
 
   private resume(): void {
@@ -294,7 +326,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * Змейка упёрлась. Застывает не сразу: LOCK_DELAY_MS даём на поворот вбок (таймер — в tick()).
+   * Змейка упёрлась. Застывает не сразу: lockDelayMs текущей фазы даём на поворот вбок (таймер — в tick()).
    * Сразу застывает, если игрок сам направил её вниз или повернуть некуда.
    */
   private rest(queued: Dir | undefined): void {
@@ -387,8 +419,9 @@ export class GameScene extends Phaser.Scene {
     if (this.isSnakeInPipe()) return;
 
     this.pipeTimer += dt;
-    if (this.pipeTimer < PIPE_STEP_MS) return;
-    this.pipeTimer -= PIPE_STEP_MS;
+    const pipeStepMs = this.params().pipeStepMs;
+    if (this.pipeTimer < pipeStepMs) return;
+    this.pipeTimer -= pipeStepMs;
 
     const next = this.pipeCol + this.pipeDir;
     if (next < 0 || next >= COLS) this.pipeDir = -this.pipeDir; // у стенки разворачивается
@@ -493,6 +526,14 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  /** Свернул вкладку или приложение (звонок, другое окно) — игра встаёт на паузу и ждёт. */
+  private setupAutoPause(): void {
+    const onHidden = (): void => this.pause();
+    this.game.events.on(Phaser.Core.Events.HIDDEN, onHidden);
+    // События игры живут дольше сцены: при рестарте снимаем слушателя, иначе они накопятся
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.game.events.off(Phaser.Core.Events.HIDDEN, onHidden));
+  }
+
   /** Координаты пальца в игровых пикселях 540×960 (canvas увеличен камерой). */
   private toWorld(pointer: Phaser.Input.Pointer): { x: number; y: number } {
     const point = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
@@ -555,7 +596,7 @@ export class GameScene extends Phaser.Scene {
     if (this.isGameOver) return { body: DEAD_COLOR, head: DEAD_HEAD_COLOR, lookDir, isDead: true };
 
     // Пока змейка стоит на опоре, она «твердеет» — перекрашивается в цвет будущих блоков
-    const hardness = this.isResting ? (this.restMs / LOCK_DELAY_MS) * HARDEN_MAX : 0;
+    const hardness = this.isResting ? (this.restMs / this.params().lockDelayMs) * HARDEN_MAX : 0;
     const target = pieceColor(this.pieceCount);
     return {
       body: lerpColor(SNAKE_COLOR, target, hardness),
@@ -575,17 +616,46 @@ export class GameScene extends Phaser.Scene {
 
     label(FIELD_X, 'ОЧКИ');
     label(center, 'УРОВЕНЬ').setOrigin(0.5, 0);
-    label(right, 'РЕКОРД').setOrigin(1, 0);
+    label(HUD_RIGHT, 'РЕКОРД').setOrigin(1, 0);
     this.scoreText = addText(this, FIELD_X, HUD_VALUE_Y, '', 34, TEXT_COLOR, true).setOrigin(0, 0.5);
     this.levelText = addText(this, center, HUD_VALUE_Y, '', 34, TEXT_COLOR, true).setOrigin(0.5);
-    this.bestText = addText(this, right, HUD_VALUE_Y, '', 34, TEXT_COLOR, true).setOrigin(1, 0.5);
+    this.bestText = addText(this, HUD_RIGHT, HUD_VALUE_Y, '', 34, TEXT_COLOR, true).setOrigin(1, 0.5);
     this.linesText = addText(this, FIELD_X, HUD_ROW2_Y, '', 15, MUTED_COLOR).setOrigin(0, 0.5);
     addText(this, right - MAX_LENGTH * LENGTH_DOT_STEP - 6, HUD_ROW2_Y, 'ДЛИНА', 13, MUTED_COLOR, true)
       .setOrigin(1, 0.5)
       .setLetterSpacing(2);
+    this.statusText = addText(this, center, STATUS_Y, '', 15, MUTED_COLOR).setOrigin(0.5);
 
     this.hud = this.add.graphics();
+    this.createPauseButton();
     this.updateHud(false);
+  }
+
+  /** Кнопка паузы в правом верхнем углу: на телефоне нет Esc. Срабатывает, когда палец отпущен над ней. */
+  private createPauseButton(): void {
+    const size = PAUSE_BUTTON_SIZE;
+    const x = FIELD_X + FIELD_W - size / 2;
+    const y = HUD_LABEL_Y + size / 2 + 4;
+
+    const g = this.add.graphics();
+    g.fillStyle(HUD_EMPTY_COLOR);
+    g.fillRoundedRect(x - size / 2, y - size / 2, size, size, 10);
+    g.lineStyle(2, PAUSE_BORDER_COLOR);
+    g.strokeRoundedRect(x - size / 2, y - size / 2, size, size, 10);
+    g.fillStyle(PAUSE_ICON_COLOR); // две полоски «II»
+    g.fillRoundedRect(x - 8, y - 9, 5, 18, 2);
+    g.fillRoundedRect(x + 3, y - 9, 5, 18, 2);
+
+    this.add
+      .zone(x, y, PAUSE_HIT_W, PAUSE_HIT_H)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerup', () => this.pause());
+  }
+
+  /** «Фаза 1 · 0:42» под стаканом. Время игровое: на паузе стоит, после рестарта с нуля. */
+  private updateStatus(): void {
+    this.statusText.setText(`Фаза ${this.phase} · ${formatTime(this.playTimeMs)}`);
+    this.statusText.setColor(this.phase > 1 ? ACCENT_COLOR : MUTED_COLOR);
   }
 
   private updateHud(bumpScore: boolean): void {
@@ -702,6 +772,13 @@ export class GameScene extends Phaser.Scene {
     showBanner(this, `Уровень ${this.level}`, changes ? `Змейка ${changes}` : 'Так держать!');
     bump(this, this.levelText);
   }
+}
+
+/** 42 000 мс → «0:42». */
+function formatTime(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const seconds = String(totalSeconds % 60).padStart(2, '0');
+  return `${Math.floor(totalSeconds / 60)}:${seconds}`;
 }
 
 function easeOut(t: number): number {
