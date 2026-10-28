@@ -4,6 +4,7 @@ import {
   DROP_STEP_MS,
   LINES_PER_LEVEL,
   MAX_LENGTH,
+  PHASE_2_AT_SCORE,
   SPAWN_COL,
   clearFullRows,
   columnTop,
@@ -14,7 +15,7 @@ import {
   isOpposite,
   levelForLines,
   move,
-  phaseForTime,
+  phaseForScore,
   phaseParams,
   scoreForLines,
   shapeMultiplier,
@@ -81,7 +82,7 @@ const VIBRATE_GAME_OVER_MS = 150;
 const HINT_ALPHA = 0.55;
 const POPUP_BOTTOM_MARGIN = 100; // «+600 ×3 за изгибы» не вылезает за дно стакана
 const BADGE_OFFSET_PX = 6; // значок «×3» сдвинут от головы наружу
-const PHASE_BANNER_Y = FIELD_Y + FIELD_H * 0.6; // ниже баннера уровня, чтобы они не наложились
+const PHASE_BANNER_Y = FIELD_Y + FIELD_H * 0.2; // выше баннера уровня и всплывающих очков, чтобы не наложились
 
 // верхняя панель
 const HUD_LABEL_Y = 12;
@@ -98,7 +99,7 @@ const PAUSE_HIT_H = 72;
 const HUD_RIGHT = FIELD_X + FIELD_W - PAUSE_BUTTON_SIZE - 14; // рекорд стоит левее кнопки паузы
 const PAUSE_BORDER_COLOR = 0x334155;
 const PAUSE_ICON_COLOR = 0xcbd5e1;
-const STATUS_Y = 948; // строка «Фаза 1 · 0:42» под стаканом
+const STATUS_Y = 948; // строка «Фаза 1 · фаза 2 с 1000 очков» под стаканом
 
 const BEST_SCORE_KEY = 'zmeytris-best-score';
 
@@ -156,7 +157,6 @@ export class GameScene extends Phaser.Scene {
   private prevPipeCol = SPAWN_COL;
   private pipeDir = 1; // 1 — труба едет вправо, -1 — влево
   private pipeTimer = 0;
-  private playTimeMs = 0; // игровое время: идёт только в tick(), пауза и экраны не в счёт
   private phase = 1;
   private bestScore = 0;
   private isStarted = false;
@@ -198,16 +198,11 @@ export class GameScene extends Phaser.Scene {
   update(_time: number, delta: number): void {
     // На паузе правила стоят: змейка, труба и таймер застывания не двигаются
     if (this.isStarted && !this.isGameOver && !this.isPaused) this.tick(Math.min(delta, MAX_FRAME_DELTA_MS));
-    this.updateStatus();
     this.render();
   }
 
   /** Игровое время: вызывается только во время игры. Всё, что внутри, на паузе стоит. */
   private tick(dt: number): void {
-    this.playTimeMs += dt;
-    const phase = phaseForTime(this.playTimeMs);
-    if (phase !== this.phase) this.enterPhase(phase);
-
     this.updatePipe(dt);
 
     this.stepTimer += dt;
@@ -256,7 +251,6 @@ export class GameScene extends Phaser.Scene {
     this.prevPipeCol = SPAWN_COL;
     this.pipeDir = 1;
     this.pipeTimer = 0;
-    this.playTimeMs = 0;
     this.phase = 1;
     this.bestScore = loadBestScore();
     this.isStarted = false;
@@ -386,6 +380,8 @@ export class GameScene extends Phaser.Scene {
     if (isBigClear) this.cameras.main.shake(250, 0.006);
     vibrate(isBigClear ? VIBRATE_BIG_MS : VIBRATE_LINE_MS);
     if (this.level > oldLevel) this.showLevelUp(oldLevel);
+    const phase = phaseForScore(this.score);
+    if (phase !== this.phase) this.enterPhase(phase);
     this.updateHud(true);
   }
 
@@ -652,10 +648,10 @@ export class GameScene extends Phaser.Scene {
       .on('pointerup', () => this.pause());
   }
 
-  /** «Фаза 1 · 0:42» под стаканом. Время игровое: на паузе стоит, после рестарта с нуля. */
+  /** «Фаза 1 · фаза 2 с 1000 очков» под стаканом; в фазе 2 — жёлтая «Фаза 2». */
   private updateStatus(): void {
-    this.statusText.setText(`Фаза ${this.phase} · ${formatTime(this.playTimeMs)}`);
-    this.statusText.setColor(this.phase > 1 ? ACCENT_COLOR : MUTED_COLOR);
+    const text = this.phase === 1 ? `Фаза 1 · фаза 2 с ${PHASE_2_AT_SCORE} очков` : `Фаза ${this.phase}`;
+    this.statusText.setText(text).setColor(this.phase > 1 ? ACCENT_COLOR : MUTED_COLOR);
   }
 
   private updateHud(bumpScore: boolean): void {
@@ -664,6 +660,7 @@ export class GameScene extends Phaser.Scene {
     this.bestText.setText(String(Math.max(this.bestScore, this.score)));
     this.bestText.setColor(this.score > this.bestScore ? ACCENT_COLOR : TEXT_COLOR); // рекорд бьётся прямо сейчас
     this.linesText.setText(`Линии: ${this.lines}`);
+    this.updateStatus();
     this.drawHudBars();
     if (bumpScore) bump(this, this.scoreText);
   }
@@ -772,13 +769,6 @@ export class GameScene extends Phaser.Scene {
     showBanner(this, `Уровень ${this.level}`, changes ? `Змейка ${changes}` : 'Так держать!');
     bump(this, this.levelText);
   }
-}
-
-/** 42 000 мс → «0:42». */
-function formatTime(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1000);
-  const seconds = String(totalSeconds % 60).padStart(2, '0');
-  return `${Math.floor(totalSeconds / 60)}:${seconds}`;
 }
 
 function easeOut(t: number): number {

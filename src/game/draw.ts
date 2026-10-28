@@ -155,7 +155,8 @@ export function drawSnake(g: Graphics, cells: Cell[], look: SnakeLook): void {
   const isVisible = (cell: Cell): boolean => cell.row > -1;
 
   for (let i = cells.length - 1; i > 0; i--) {
-    if (isVisible(cells[i]) || isVisible(cells[i - 1])) drawLink(g, cells[i], cells[i - 1], colorAt(i));
+    // Перемычку рисуем, только если видны обе клетки: иначе она торчит из трубы вверх
+    if (isVisible(cells[i]) && isVisible(cells[i - 1])) drawLink(g, cells[i], cells[i - 1], colorAt(i));
   }
   for (let i = cells.length - 1; i >= 0; i--) {
     if (isVisible(cells[i])) drawBlock(g, cells[i], colorAt(i));

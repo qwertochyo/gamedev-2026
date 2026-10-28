@@ -27,9 +27,9 @@ export const LINE_SCORE_BASE = 100; // очки = база × линии × мн
 export const MULTIPLIER_PER_TURN = 1; // каждый изгиб змейки добавляет к множителю: прямая ×1, Г ×2, Z ×3
 export const DROP_STEP_MS = 40; // шаг ускоренного падения (↓, когда змейка и так ползёт вниз)
 
-// Фазы. Правила в обеих одинаковые — со временем меняются только параметры.
-// Уровни (по линиям) меняют длину и скорость змейки, фазы (по игровому времени) — трубу и застывание.
-export const PHASE_2_AT_MS = 60_000; // фаза 2 через 60 с игрового времени (пауза не в счёт)
+// Фазы. Правила в обеих одинаковые — с ростом очков меняются только параметры.
+// Уровни (по линиям) меняют длину и скорость змейки, фазы (по очкам) — трубу и застывание.
+export const PHASE_2_AT_SCORE = 1000; // фаза 2 с 1000 очков (примерно 5–10 линий)
 
 export interface PhaseParams {
   pipeStepMs: number; // за сколько труба сдвигается на столбец
@@ -117,9 +117,9 @@ export function snakeLengthForLevel(level: number): number {
   return Math.min(START_LENGTH + level - 1, MAX_LENGTH);
 }
 
-/** Номер фазы по игровому времени: 1 или 2. */
-export function phaseForTime(playTimeMs: number): number {
-  return playTimeMs < PHASE_2_AT_MS ? 1 : 2;
+/** Номер фазы по очкам: 1 или 2. */
+export function phaseForScore(score: number): number {
+  return score < PHASE_2_AT_SCORE ? 1 : 2;
 }
 
 export function phaseParams(phase: number): PhaseParams {
