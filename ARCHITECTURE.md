@@ -19,7 +19,8 @@ flowchart TD
     view["Отрисовка и эффекты<br/>render() · HUD · вспышки"]
     pipe["Труба<br/>updatePipe()"]
     snake["Змейка — игрок<br/>spawnSnake() · step() · rest() · freeze()"]
-    lines["Линии и прогресс<br/>clearLines()"]
+    lines["Очистка линий<br/>clearLines() · celebrateLines()"]
+    progress["Прогресс<br/>addProgress()"]
     phase["Фаза 2<br/>enterPhase()"]
     over["Конец игры<br/>gameOver() · restart()"]
     state[("Состояние партии<br/>grid · snake · score · lines<br/>level · phase · флаги")]
@@ -43,13 +44,14 @@ flowchart TD
   input -- "команды → dirQueue" --> snake
   pipe -- "откуда выползет" --> snake
   snake -- "заполнила ряд" --> lines
-  lines -- "очки ≥ 1000" --> phase
+  lines -- "очки за линии" --> progress
+  progress -- "очки ≥ 1000" --> phase
   snake -- "не вылезла из трубы<br/>или под трубой занято" --> over
   over -- "рекорд" --> storage
   create -- "первая змейка" --> snake
   create -- "resetState()" --> state
   snake -- "застыла → блоки в grid" --> state
-  lines -- "score · lines · level" --> state
+  progress -- "score · lines · level" --> state
   phase -- "phase: быстрее труба<br/>и застывание" --> state
   over -- "scene.restart() →<br/>resetState()" --> state
   GS -. "правила и числа" .-> logic
@@ -60,7 +62,7 @@ flowchart TD
 | Что | Файл | Где именно |
 |---|---|---|
 | Ввод | `GameScene.ts` | `setupKeyboard()` → `handleKey()`, `setupPointer()` → `handleSwipe()`; обе ведут в `queueDir()`. ↓ во время падения — `pressDownWhileFalling()`. Esc и кнопка «II» — `togglePause()` / `pause()`, сворачивание вкладки — `setupAutoPause()` |
-| Состояние игры | `GameScene.ts` | поля класса: `grid`, `snake`, `dir`, `dirQueue`, `score`, `lines`, `level`, `phase`, таймеры `stepTimer`, `pipeTimer`, `restMs`, флаги `isStarted`, `isPaused`, `isGameOver` |
+| Состояние игры | `GameScene.ts` | поля класса: `grid`, `snake`, `dir`, `dirQueue`, `score`, `lines`, `level`, `phase`, таймеры `stepTimer`, `pipeTimer`, `restMs`, флаги `isStarted`, `isPaused`, `isGameOver`. Очки, линии, уровень и фазу меняет только `addProgress()` |
 | Результат — конец игры | `GameScene.ts` | `gameOver()`: зовут `freeze()` (змейка застыла, не выбравшись из трубы) и `spawnSnake()` (под трубой занято). Рекорд — `saveBestScore()`, карточка — `showGameOverCard()` в `ui.ts` |
 | Перезапуск | `GameScene.ts` | `restart()` → `scene.restart({ skipIntro: true })` → `create()` → `resetState()` сбрасывает всё состояние партии |
 | Сложность, появление, правила | `logic.ts` | настройки в начале файла: длина и скорость змейки, линии на уровень, очки, порог и параметры фаз. Формулы — `snakeLengthForLevel()`, `stepMsForLevel()`, `levelForLines()`, `scoreForLines()`, `phaseForScore()`, `phaseParams()`. Появление змейки — `spawnSnake()` и `updatePipe()` в `GameScene.ts` |
@@ -74,4 +76,4 @@ flowchart TD
 
 - `GameScene.ts` — самая нагруженная часть (около 800 строк): состояние, ввод, правила шага, прогресс, эффекты и верхняя панель в одном классе. Почти любое новое правило меняет этот файл.
 - Состояние «старт / игра / пауза / конец» хранится в трёх отдельных флагах, и каждую проверку пишут вручную в нескольких методах.
-- Очки, уровень и фаза обновляются внутри `clearLines()`: если очки начнут начисляться где-то ещё, фазу и уровень легко забыть обновить.
+- Очки, линии, уровень и фаза меняются только в `addProgress()`. Раньше это было спрятано внутри `clearLines()` вместе с эффектами — вынесено рефакторингом, чтобы новый источник очков (например, бонус) не забыл обновить уровень и фазу.

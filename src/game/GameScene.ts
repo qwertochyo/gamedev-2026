@@ -362,23 +362,36 @@ export class GameScene extends Phaser.Scene {
     this.spawnSnake();
   }
 
-  /** multiplier — множитель за изгибы змейки, которая закрыла линии. */
+  /** Убирает заполненные строки. multiplier — множитель за изгибы змейки, которая их закрыла. */
   private clearLines(multiplier: number): void {
     const rows = findFullRows(this.grid);
     if (rows.length === 0) return;
     clearFullRows(this.grid);
 
-    const oldLevel = this.level;
     const points = scoreForLines(rows.length, multiplier);
-    this.score += points;
-    this.lines += rows.length;
-    this.level = levelForLines(this.lines);
+    this.celebrateLines(rows, points, multiplier);
+    this.addProgress(rows.length, points);
+  }
 
+  /** Эффекты очистки: вспышка строк, «+400», тряска, вибрация. На правила не влияют. */
+  private celebrateLines(rows: number[], points: number, multiplier: number): void {
     this.flashRows(rows);
     this.showLinePoints(rows, points, multiplier);
     const isBigClear = rows.length >= BIG_CLEAR_LINES;
     if (isBigClear) this.cameras.main.shake(250, 0.006);
     vibrate(isBigClear ? VIBRATE_BIG_MS : VIBRATE_LINE_MS);
+  }
+
+  /**
+   * Единственное место, где растут очки и линии. Здесь же переходы уровня и фазы,
+   * поэтому любой новый источник очков сам двигает прогресс — достаточно вызвать этот метод.
+   */
+  private addProgress(lines: number, points: number): void {
+    const oldLevel = this.level;
+    this.score += points;
+    this.lines += lines;
+    this.level = levelForLines(this.lines);
+
     if (this.level > oldLevel) this.showLevelUp(oldLevel);
     const phase = phaseForScore(this.score);
     if (phase !== this.phase) this.enterPhase(phase);
