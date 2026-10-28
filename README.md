@@ -55,7 +55,7 @@
 
 Уровни (по линиям) меняют длину и скорость змейки, фазы (по очкам) — трубу и застывание, поэтому две системы не спорят за один параметр. После «Ещё раз» очки обнуляются, и игра снова в фазе 1.
 
-**Игровое время** — всё, что считается в `tick()`: шаги змейки (`stepTimer`), движение трубы (`pipeTimer`), пауза перед застыванием (`restMs`). `tick()` вызывается, только пока идёт игра, поэтому пауза, стартовый экран, конец игры и свёрнутая вкладка не в счёт. **Время браузера** (часы Phaser) используют только украшения: мигание красной трубы, всплывающие надписи, задержка перед карточкой конца игры — на паузе им идти можно.
+**Игровое время** — всё, что считается в `Round.tick()` (`round.ts`): шаги змейки (`stepTimer`), движение трубы (`pipeTimer`), пауза перед застыванием (`restMs`). Сцена вызывает `tick()`, только пока идёт игра, поэтому пауза, стартовый экран, конец игры и свёрнутая вкладка не в счёт. **Время браузера** (часы Phaser) используют только украшения: мигание красной трубы, всплывающие надписи, задержка перед карточкой конца игры — на паузе им идти можно.
 
 ## Что видно на экране
 
@@ -111,10 +111,15 @@ Workflow [`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml) соб
 ├── src/
 │   ├── game/
 │   │   ├── config.ts              # конфигурация Phaser, экран 540×960 (canvas ×2 для чёткости)
-│   │   ├── logic.ts               # правила поля без Phaser: сетка, линии, уровни
-│   │   ├── draw.ts                # рисование стакана, блоков, змейки, трубы; цвета и размеры
-│   │   ├── ui.ts                  # тексты, кнопки, стартовый экран, карточка конца игры
-│   │   └── GameScene.ts           # состояние партии, ввод, эффекты, связь всего вместе
+│   │   ├── GameScene.ts           # сцена: связывает части и ведёт поток игры (старт, пауза, конец, рестарт)
+│   │   ├── round.ts               # партия без Phaser: стакан, змейка, труба, очки, уровень, фаза, правила хода
+│   │   ├── logic.ts               # настройки баланса и формулы без Phaser: сетка, линии, уровни, фазы
+│   │   ├── input.ts               # клавиатура, свайпы, сворачивание вкладки → команды для сцены
+│   │   ├── hud.ts                 # верхняя панель, кнопка паузы, строка фазы
+│   │   ├── effects.ts             # вспышки, «+400», баннеры, значок «×2», тряска, вибрация
+│   │   ├── draw.ts                # рисование стакана, змейки, трубы; цвета и размеры
+│   │   ├── ui.ts                  # тексты, кнопки, подсказка, экраны старта, паузы и конца
+│   │   └── storage.ts             # рекорд в localStorage
 │   ├── main.ts                    # точка входа
 │   └── style.css                  # вертикальный экран, запрет прокрутки свайпами
 ├── AGENTS.md                      # правила для AI-кодинга
@@ -130,16 +135,18 @@ Workflow [`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml) соб
 
 Где искать механики:
 
-- шаг змейки, сползание вдоль стенок — `step()`, `resolveMove()` в `GameScene.ts`;
-- пауза на опоре перед застыванием — `rest()`, ускорение падения — `pressDownWhileFalling()`;
-- движение трубы — `updatePipe()`;
-- застывание и конец игры — `freeze()`, `spawnSnake()`, `gameOver()`;
-- очистка линий — `clearFullRows()` в `logic.ts`, очки — `clearLines()` в `GameScene.ts`;
-- множитель за изгибы — `countTurns()`, `shapeMultiplier()`, `scoreForLines()` в `logic.ts`, значок у головы — `updateMultiplierBadge()`;
+- шаг змейки, сползание вдоль стенок — `step()`, `resolveMove()` в `round.ts`;
+- пауза на опоре перед застыванием — `rest()`, ускорение падения — `pressDownWhileFalling()` в `round.ts`;
+- движение трубы — `updatePipe()` в `round.ts`;
+- застывание и конец игры — `freeze()`, `spawnSnake()`, `gameOver()` в `round.ts`; карточка конца и рекорд — `gameOver()` в `GameScene.ts`;
+- очистка линий — `clearFullRows()` в `logic.ts`, очки, уровень и фаза — `clearLines()`, `addProgress()` в `round.ts`;
+- множитель за изгибы — `countTurns()`, `shapeMultiplier()`, `scoreForLines()` в `logic.ts`, значок у головы — `MultiplierBadge` в `effects.ts`;
 - скорость и длина по уровням — `stepMsForLevel()`, `snakeLengthForLevel()` в `logic.ts`;
-- свайпы и клавиатура — `handleSwipe()`, `handleKey()`, `queueDir()`;
-- пауза — `togglePause()`, `pause()`, `resume()`, кнопка — `createPauseButton()`, автопауза — `setupAutoPause()` в `GameScene.ts`, экран паузы — `showPauseScreen()` в `ui.ts`;
-- фазы — `PHASE_2_AT_SCORE`, `phaseForScore()`, `phaseParams()` в `logic.ts`; смена фазы — в `clearLines()` и `enterPhase()` в `GameScene.ts`;
-- плавное движение змейки и трубы — `snakeVisualCells()`, `pipeVisualCol()`;
-- эффекты линий и уровня — `flashRows()`, `showLinePoints()`, `showLevelUp()`;
-- игровые параметры — константы в начале `logic.ts`; цвета и размеры — в `draw.ts`; анимации и панель — в `GameScene.ts`.
+- свайпы и клавиатура — `input.ts`; что они делают в игре — `handleKey()`, `handleDir()` в `GameScene.ts`, буфер команд — `queueDir()` в `round.ts`;
+- пауза — `togglePause()`, `pause()`, `resume()` в `GameScene.ts`, кнопка — `createPauseButton()` в `hud.ts`, автопауза — `setupHidden()` в `input.ts`, экран паузы — `showPauseScreen()` в `ui.ts`;
+- фазы — `PHASE_2_AT_SCORE`, `phaseForScore()`, `phaseParams()` в `logic.ts`; смена фазы — `addProgress()`, `enterPhase()` в `round.ts`, баннер — `showPhaseBanner()` в `effects.ts`;
+- плавное движение змейки и трубы — `drawRound()` в `draw.ts`;
+- эффекты линий и уровня — `celebrateLines()`, `showLevelUpBanner()` в `effects.ts`;
+- игровые параметры — константы в начале `logic.ts`; цвета и размеры — в `draw.ts`; панель — в `hud.ts`, эффекты — в `effects.ts`.
+
+Как части связаны между собой — схема в [`ARCHITECTURE.md`](./ARCHITECTURE.md).

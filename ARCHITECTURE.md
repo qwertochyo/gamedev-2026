@@ -1,79 +1,65 @@
 # Архитектура Змейтриса — как есть
 
-Одна сцена Phaser [`GameScene`](./src/game/GameScene.ts) — центр игры: в ней состояние партии, ввод, игровой цикл и связь всего вместе. Правила и настройки баланса вынесены в [`logic.ts`](./src/game/logic.ts) (без Phaser), рисование — в [`draw.ts`](./src/game/draw.ts), экраны и надписи — в [`ui.ts`](./src/game/ui.ts).
+Сцена Phaser [`GameScene`](./src/game/GameScene.ts) связывает части игры и ведёт её поток: старт → игра ⇄ пауза → конец → «Ещё раз». Сама партия со всеми правилами — в [`round.ts`](./src/game/round.ts), без Phaser. Остальное разложено по файлам: ввод, панель, эффекты, рисование, экраны, рекорд.
 
 ## Схема
 
-Сплошная стрелка — вызывает или меняет состояние. Пунктир — берёт правила и числа из `logic.ts`. Схему рисует GitHub прямо в этом файле.
+Сплошная стрелка — вызывает или меняет состояние. Пунктир — только читает. Схему рисует GitHub прямо в этом файле.
 
 ```mermaid
 flowchart TD
   main["main.ts → config.ts<br/>Phaser"]
 
-  subgraph GS["GameScene.ts — центр игры"]
-    create["create()<br/>HUD, ввод, подписки"]
-    input["Ввод<br/>handleKey() · handleSwipe()"]
-    pause["Пауза<br/>pause() · resume()"]
-    update["update()"]
-    tick["tick(dt) — игровое время"]
-    view["Отрисовка и эффекты<br/>render() · HUD · вспышки"]
-    pipe["Труба<br/>updatePipe()"]
-    snake["Змейка — игрок<br/>spawnSnake() · step() · rest() · freeze()"]
-    lines["Очистка линий<br/>clearLines() · celebrateLines()"]
-    progress["Прогресс<br/>addProgress()"]
-    phase["Фаза 2<br/>enterPhase()"]
-    over["Конец игры<br/>gameOver() · restart()"]
-    state[("Состояние партии<br/>grid · snake · score · lines<br/>level · phase · флаги")]
+  subgraph SC["GameScene.ts — поток игры"]
+    create["create()<br/>new Round · Hud · ввод"]
+    update["update() — каждый кадр"]
+    flow["Старт · пауза · конец · рестарт<br/>handleKey() · pause() · gameOver() · restart()"]
   end
 
-  logic["logic.ts<br/>правила + настройки баланса"]
-  draw["draw.ts<br/>рисование"]
-  ui["ui.ts<br/>экраны и надписи"]
-  storage[("localStorage<br/>рекорд")]
+  input["input.ts<br/>клавиши · свайпы · сворачивание"]
+  round["round.ts — партия<br/>tick() · queueDir() · step() · freeze()<br/>clearLines() · addProgress() · enterPhase()"]
+  logic["logic.ts<br/>настройки баланса + формулы"]
+  draw["draw.ts<br/>drawRound(): стакан, змейка, труба"]
+  hud["hud.ts<br/>панель · кнопка II · строка фазы"]
+  effects["effects.ts<br/>вспышки · «+400» · баннеры · «×2»"]
+  ui["ui.ts<br/>старт · пауза · конец · подсказка"]
+  storage[("storage.ts<br/>рекорд в localStorage")]
 
   main -- "один раз" --> create
   main -- "каждый кадр" --> update
-  input -- "Esc · кнопка II" --> pause
-  pause -- "isPaused" --> update
-  update -- "если игра идёт" --> tick
-  update --> view
-  view --> draw
-  view --> ui
-  tick --> pipe
-  tick --> snake
-  input -- "команды → dirQueue" --> snake
-  pipe -- "откуда выползет" --> snake
-  snake -- "заполнила ряд" --> lines
-  lines -- "очки за линии" --> progress
-  progress -- "очки ≥ 1000" --> phase
-  snake -- "не вылезла из трубы<br/>или под трубой занято" --> over
-  over -- "рекорд" --> storage
-  create -- "первая змейка" --> snake
-  create -- "resetState()" --> state
-  snake -- "застыла → блоки в grid" --> state
-  progress -- "score · lines · level" --> state
-  phase -- "phase: быстрее труба<br/>и застывание" --> state
-  over -- "scene.restart() →<br/>resetState()" --> state
-  GS -. "правила и числа" .-> logic
+  create -- "new Round()" --> round
+  input -- "клавиша, свайп,<br/>свернули вкладку" --> flow
+  hud -- "кнопка II" --> flow
+  flow -- "queueDir(), если игра идёт" --> round
+  update -- "tick(dt), если не пауза" --> round
+  update -- "drawRound()" --> draw
+  draw -. "читает поля" .-> round
+  round -- "события: застыла, линии,<br/>уровень, фаза, очки, конец" --> flow
+  flow --> effects
+  flow -- "числа" --> hud
+  flow -- "экраны" --> ui
+  flow -- "рекорд" --> storage
+  round -. "формулы и числа" .-> logic
 ```
 
 ## Где что живёт
 
 | Что | Файл | Где именно |
 |---|---|---|
-| Ввод | `GameScene.ts` | `setupKeyboard()` → `handleKey()`, `setupPointer()` → `handleSwipe()`; обе ведут в `queueDir()`. ↓ во время падения — `pressDownWhileFalling()`. Esc и кнопка «II» — `togglePause()` / `pause()`, сворачивание вкладки — `setupAutoPause()` |
-| Состояние игры | `GameScene.ts` | поля класса: `grid`, `snake`, `dir`, `dirQueue`, `score`, `lines`, `level`, `phase`, таймеры `stepTimer`, `pipeTimer`, `restMs`, флаги `isStarted`, `isPaused`, `isGameOver`. Очки, линии, уровень и фазу меняет только `addProgress()` |
-| Результат — конец игры | `GameScene.ts` | `gameOver()`: зовут `freeze()` (змейка застыла, не выбравшись из трубы) и `spawnSnake()` (под трубой занято). Рекорд — `saveBestScore()`, карточка — `showGameOverCard()` в `ui.ts` |
-| Перезапуск | `GameScene.ts` | `restart()` → `scene.restart({ skipIntro: true })` → `create()` → `resetState()` сбрасывает всё состояние партии |
-| Сложность, появление, правила | `logic.ts` | настройки в начале файла: длина и скорость змейки, линии на уровень, очки, порог и параметры фаз. Формулы — `snakeLengthForLevel()`, `stepMsForLevel()`, `levelForLines()`, `scoreForLines()`, `phaseForScore()`, `phaseParams()`. Появление змейки — `spawnSnake()` и `updatePipe()` в `GameScene.ts` |
+| Ввод | `input.ts` → `GameScene.ts` → `round.ts` | `setupInput()` переводит клавиши в намерения (`KeyIntent`), движение пальца — в направления, сворачивание вкладки — в событие. Что с этим делать, решают `handleKey()` и `handleDir()` в сцене. Буфер команд и ↓ во время падения — `queueDir()` в `round.ts`. Кнопка «II» — `hud.ts` |
+| Состояние игры | `round.ts` + `GameScene.ts` | партия — поля `Round`: `grid`, `snake`, `dir`, `dirQueue`, `score`, `lines`, `level`, `phase`, таймеры `stepTimer`, `pipeTimer`, `restMs`, флаг `isOver`. Сцена — `isStarted`, `isPaused`, `canRestart`, `bestScore`. Очки, линии, уровень и фазу меняет только `addProgress()` |
+| Результат — конец игры | `round.ts` → `GameScene.ts` | `Round.gameOver()` зовут `freeze()` (змейка застыла, не выбравшись из трубы) и `spawnSnake()` (под трубой занято). Партия сообщает событием `onGameOver`, а `gameOver()` в сцене сохраняет рекорд (`storage.ts`), трясёт экран (`effects.ts`) и показывает карточку (`ui.ts`) |
+| Перезапуск | `GameScene.ts` | `restart()` → `scene.restart({ skipIntro: true })` → `create()`: новая партия `new Round()` и сброс флагов сцены |
+| Сложность, появление, правила | `logic.ts` + `round.ts` | настройки в начале `logic.ts`: длина и скорость змейки, линии на уровень, очки, порог и параметры фаз. Формулы — `snakeLengthForLevel()`, `stepMsForLevel()`, `levelForLines()`, `scoreForLines()`, `phaseForScore()`, `phaseParams()`. Появление змейки — `spawnSnake()` и `updatePipe()` в `round.ts` |
 
 ## Время
 
-- **Игровое время** — всё, что считается в `tick(dt)`: шаги змейки (`stepTimer`), движение трубы (`pipeTimer`), пауза перед застыванием (`restMs`). На паузе, на стартовом экране и после конца игры `tick()` не вызывается.
-- **Время браузера** — только украшения: анимации из `ui.ts` и вспышки, мигание красной трубы (`this.time.now`), задержка перед карточкой конца игры (`this.time.delayedCall`).
+- **Игровое время** — всё, что считается в `Round.tick(dt)`: шаги змейки (`stepTimer`), движение трубы (`pipeTimer`), пауза перед застыванием (`restMs`). Сцена не вызывает `tick()` на паузе, на стартовом экране и после конца игры.
+- **Время браузера** — только украшения: анимации из `ui.ts` и `effects.ts`, мигание красной трубы (`this.time.now` в `drawRound()`), задержка перед карточкой конца игры (`this.time.delayedCall`).
 
 ## Замечания
 
-- `GameScene.ts` — самая нагруженная часть (около 800 строк): состояние, ввод, правила шага, прогресс, эффекты и верхняя панель в одном классе. Почти любое новое правило меняет этот файл.
-- Состояние «старт / игра / пауза / конец» хранится в трёх отдельных флагах, и каждую проверку пишут вручную в нескольких методах.
-- Очки, линии, уровень и фаза меняются только в `addProgress()`. Раньше это было спрятано внутри `clearLines()` вместе с эффектами — вынесено рефакторингом, чтобы новый источник очков (например, бонус) не забыл обновить уровень и фазу.
+- `GameScene.ts` (около 180 строк) только связывает части. Правила партии живут в `round.ts` без Phaser — их можно менять и проверять отдельно от картинки.
+- Состояние «старт / игра / пауза / конец» по-прежнему хранится флагами: `isStarted` и `isPaused` у сцены, `isOver` у партии.
+- Поля `Round` открыты для чтения: их читают `draw.ts`, `hud.ts` и значок «×2». Менять их должны только методы `Round` — это договорённость, TypeScript её не проверяет.
+- Очки, линии, уровень и фаза меняются только в `addProgress()`, поэтому новый источник очков (например, бонус) сам двинет уровень и фазу.

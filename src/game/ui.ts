@@ -1,7 +1,7 @@
-// Тексты, кнопки и экраны поверх игры: старт, конец, всплывающие надписи.
+// Тексты, кнопки и экраны поверх игры: старт, пауза, конец, подсказка, всплывающие надписи.
 
 import Phaser from 'phaser';
-import { FIELD_H, FIELD_Y, GAME_HEIGHT, GAME_WIDTH, PALETTE, RENDER_SCALE } from './draw';
+import { FIELD_H, FIELD_W, FIELD_X, FIELD_Y, GAME_HEIGHT, GAME_WIDTH, PALETTE, RENDER_SCALE } from './draw';
 
 export const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 export const TEXT_COLOR = '#f8fafc';
@@ -105,6 +105,31 @@ export function showBanner(scene: Scene, title: string, subtitle: string, y = FI
     yoyo: true,
     onComplete: () => parts.forEach((part) => part.destroy()),
   });
+}
+
+const HINT_ALPHA = 0.55;
+
+/** Подсказка в середине стакана. Видна, пока не застыла первая змейка. */
+export function createHint(scene: Scene, isTouch: boolean): Text {
+  const controls = isTouch ? 'Свайпай ← → ↓' : 'Жми ← → ↓';
+  const text = `${controls}\n↓ ещё раз — быстрее\n\nЗмейка застынет,\nкогда упрётся вниз`;
+  return addText(scene, FIELD_X + FIELD_W / 2, FIELD_Y + FIELD_H / 2, text, 24)
+    .setAlign('center')
+    .setLineSpacing(6)
+    .setOrigin(0.5)
+    .setAlpha(HINT_ALPHA)
+    .setDepth(DEPTH.hint);
+}
+
+/** Плавно показать подсказку — когда убрали стартовый экран. */
+export function showHint(scene: Scene, hint: Text): void {
+  scene.tweens.add({ targets: hint, alpha: HINT_ALPHA, duration: 300 });
+}
+
+/** Плавно убрать подсказку — после первого застывания. */
+export function hideHint(scene: Scene, hint: Text): void {
+  if (!hint.visible || scene.tweens.isTweening(hint)) return;
+  scene.tweens.add({ targets: hint, alpha: 0, duration: 300, onComplete: () => hint.setVisible(false) });
 }
 
 function addOverlay(scene: Scene, alpha: number): Phaser.GameObjects.Rectangle {
