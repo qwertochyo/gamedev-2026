@@ -1,7 +1,7 @@
 // Отрисовка стакана, блоков, змейки и трубы. Только рисование — правила в logic.ts и round.ts.
 
 import Phaser from 'phaser';
-import { COLS, EMPTY, ROWS, columnTop, move, snakeLengthForLevel, type Cell, type Dir, type Grid } from './logic';
+import { COLS, DROP_STEP_MS, EMPTY, ROWS, SNAKE_LENGTH, columnTop, move, type Cell, type Dir, type Grid } from './logic';
 import type { Round } from './round';
 
 // экран: игра живёт в координатах 540×960, а canvas в RENDER_SCALE раз больше,
@@ -56,7 +56,7 @@ const EYE_WHITE = 0xffffff;
 const PUPIL_COLOR = 0x0f172a;
 
 // плавность и мигание
-const SLIDE_MS = 90; // за сколько змейка переползает в новую клетку
+const SLIDE_MS = 90; // за сколько змейка доезжает до новой клетки после шага или падения
 const PIPE_SLIDE_MS = 160; // за сколько труба переезжает на соседний столбец
 const HARDEN_MAX = 0.75; // насколько змейка перекрашивается, пока стоит на опоре
 const DANGER_PULSE_MS = 140; // скорость мигания трубы, когда под ней мало места
@@ -215,6 +215,19 @@ function drawPipe(g: Graphics, col: number, danger: number): void {
   g.fillRect(x, PIPE_TOP + PIPE_LIP_HEIGHT - 4, CELL, height - PIPE_LIP_HEIGHT + 4);
 }
 
+/** Маленькая фигура для панели (заказ, следующий заказ, карточка конца игры), по центру в точке (x, y). */
+export function drawShape(g: Graphics, shape: Cell[], x: number, y: number, size: number, color: number): void {
+  const cols = Math.max(...shape.map((c) => c.col)) + 1;
+  const rows = Math.max(...shape.map((c) => c.row)) + 1;
+  const left = x - (cols * size) / 2;
+  const top = y - (rows * size) / 2;
+  const gap = Math.max(1, size * 0.08);
+  g.fillStyle(color);
+  for (const cell of shape) {
+    g.fillRoundedRect(left + cell.col * size + gap, top + cell.row * size + gap, size - gap * 2, size - gap * 2, size * 0.2);
+  }
+}
+
 /** Белая вспышка поверх клеток (для эффекта застывания). */
 export function drawCellsFlash(g: Graphics, cells: Cell[]): void {
   g.fillStyle(0xffffff);
@@ -242,9 +255,10 @@ export function drawRound(g: Graphics, round: Round, timeMs: number): Cell[] {
   return snakeCells;
 }
 
-/** Змейка между прошлой и текущей клетками: доезжает за SLIDE_MS после шага. */
+/** Змейка между прошлой и текущей клетками: доезжает за SLIDE_MS после движения (при броске — быстрее). */
 function snakeVisualCells(round: Round): Cell[] {
-  const t = easeOut(Math.min(1, round.stepTimer / Math.min(SLIDE_MS, round.currentStepMs())));
+  const slideMs = round.isDropping ? DROP_STEP_MS : SLIDE_MS;
+  const t = easeOut(Math.min(1, round.moveAge / slideMs));
   return round.snake.map((cell, i) => {
     const from = round.prevSnake[i] ?? cell;
     return { col: from.col + (cell.col - from.col) * t, row: from.row + (cell.row - from.row) * t };
@@ -259,12 +273,12 @@ function pipeVisualCol(round: Round): number {
 /** 0…1 — насколько красной рисовать трубу. Мигает, если змейка не вылезет из неё прямо вниз. */
 function dangerLevel(round: Round, timeMs: number): number {
   if (round.isOver) return 1;
-  const isDanger = columnTop(round.grid, round.pipeCol) < snakeLengthForLevel(round.level);
+  const isDanger = columnTop(round.grid, round.pipeCol) < SNAKE_LENGTH;
   return isDanger ? 0.5 + 0.5 * Math.sin(timeMs / DANGER_PULSE_MS) : 0;
 }
 
 function snakeLook(round: Round): SnakeLook {
-  const lookDir = round.dirQueue[0] ?? round.dir; // глаза сразу смотрят туда, куда нажал игрок
+  const lookDir = round.dir; // глаза смотрят туда, куда последний раз шагнула голова
   if (round.isOver) return { body: DEAD_COLOR, head: DEAD_HEAD_COLOR, lookDir, isDead: true };
 
   // Пока змейка стоит на опоре, она «твердеет» — перекрашивается в цвет будущих блоков

@@ -1,13 +1,15 @@
-// Одна партия: стакан, змейка, труба, очки, уровень, фаза и правила хода. Без Phaser — только данные и правила.
+// Одна партия: стакан, змейка, заказы фигур, труба, очки, уровень, фаза и правила хода. Без Phaser — только данные и правила.
 // Наружу партия сообщает событиями (RoundEvents): сцена по ним показывает эффекты, панель и экраны.
 
 import {
   COLS,
   DROP_STEP_MS,
+  ORDER_BONUS,
+  SNAKE_LENGTH,
   SPAWN_COL,
   clearFullRows,
-  countTurns,
   createGrid,
+  fallMsForLevel,
   findFullRows,
   isFree,
   isOpposite,
@@ -16,26 +18,32 @@ import {
   phaseForScore,
   phaseParams,
   scoreForLines,
-  shapeMultiplier,
-  snakeLengthForLevel,
-  stepMsForLevel,
+  shapeOf,
+  shuffledBag,
   type Cell,
   type Dir,
   type Grid,
   type PhaseParams,
+  type ShapeId,
 } from './logic';
 
-const INPUT_BUFFER_SIZE = 2; // сколько команд копится, чтобы быстрые «вправо, вниз» не терялись
-const SIDE_DIRS: Dir[] = ['left', 'right'];
+/** Почему партия закончилась — для карточки конца игры. */
+export interface GameOverReason {
+  title: string;
+  text: string;
+  ordered?: ShapeId; // какую фигуру заказали
+  drawn?: ShapeId | null; // какую нарисовал игрок
+}
 
 /** Что происходит в партии. Сцена подписывается и показывает эффекты, панель и экраны. */
 export interface RoundEvents {
-  onFreeze(cells: Cell[]): void; // змейка застыла блоками
-  onLinesCleared(rows: number[], points: number, multiplier: number): void;
+  onFreeze(cells: Cell[]): void; // змейка застыла блоками — фигура совпала с заказом
+  onLinesCleared(rows: number[], points: number): void;
   onLevelUp(oldLevel: number, newLevel: number): void;
   onPhaseChange(phase: number): void;
-  onScoreChange(): void; // выросли очки и линии
-  onGameOver(reason: string): void;
+  onScoreChange(): void; // выросли очки, сменился заказ
+  onNewOrder(shape: ShapeId): void; // заказ выполнен, новая змейка получила следующий
+  onGameOver(reason: GameOverReason): void;
 }
 
 /**
@@ -45,19 +53,24 @@ export interface RoundEvents {
 export class Round {
   grid: Grid = createGrid();
   snake: Cell[] = [];
-  prevSnake: Cell[] = []; // где змейка была до последнего шага — для плавного движения
-  dir: Dir = 'down';
-  dirQueue: Dir[] = [];
+  prevSnake: Cell[] = []; // где змейка была до последнего движения — для плавной отрисовки
+  moveAge = 0; // сколько мс прошло с последнего движения змейки
+  dir: Dir = 'down'; // куда последний раз шагнула голова
+  orders: ShapeId[] = []; // очередь заказов: [0] — текущий, [1] — следующий
   pieceCount = 0; // сколько змеек застыло; это же номер (и цвет) следующей
   score = 0;
   lines = 0;
   level = 1;
   phase = 1;
-  stepMs = stepMsForLevel(1);
-  stepTimer = 0;
-  isResting = false; // змейка упёрлась и ждёт: вдруг игрок повернёт
-  restMs = 0; // сколько змейка уже стоит на опоре
-  isDropping = false; // ускоренное падение
+  fallMs = fallMsForLevel(1);
+  fallTimer = 0;
+  isResting = false; // змейка легла на опору и ждёт: можно ещё дорисовать
+  restMs = 0; // сколько змейка уже лежит на опоре
+  isDropping = false; // брошена пробелом: падает до опоры и сразу застывает
+  // «Потолок»: выше этой строки змейка подняться не может. Голова поднимается не больше чем на длину змейки
+  // над строкой, куда её опустила гравитация (у новой змейки это строка 0), и потолок опускается при каждом падении.
+  // Так ↑ можно жать сколько угодно, но уползти от гравитации и висеть на поле нельзя
+  upLimitRow = -SNAKE_LENGTH;
   pipeCol = SPAWN_COL;
   prevPipeCol = SPAWN_COL;
   pipeDir = 1; // 1 — труба едет вправо, -1 — влево
@@ -68,17 +81,34 @@ export class Round {
 
   constructor(events: RoundEvents) {
     this.events = events;
+    this.fillOrders();
     this.spawnSnake();
+  }
+
+  /** Заказанная фигура — её нужно нарисовать текущей змейкой. */
+  order(): ShapeId {
+    return this.orders[0];
+  }
+
+  /** Следующий заказ — показываем заранее, как «следующую фигуру» в тетрисе. */
+  nextOrder(): ShapeId {
+    return this.orders[1];
+  }
+
+  /** Совпадает ли змейка с заказом прямо сейчас. */
+  matchesOrder(): boolean {
+    return this.snake.length > 0 && shapeOf(this.snake) === this.order();
   }
 
   /** Игровое время: сцена зовёт каждый кадр, пока идёт игра. На паузе не зовёт — и всё стоит. */
   tick(dt: number): void {
+    this.moveAge += dt;
     this.updatePipe(dt);
 
-    this.stepTimer += dt;
-    while (this.stepTimer >= this.currentStepMs() && !this.isOver) {
-      this.stepTimer -= this.currentStepMs();
-      this.step();
+    this.fallTimer += dt;
+    while (this.fallTimer >= this.currentFallMs() && !this.isOver) {
+      this.fallTimer -= this.currentFallMs();
+      this.fall();
     }
 
     if (this.isResting && !this.isOver) {
@@ -87,8 +117,8 @@ export class Round {
     }
   }
 
-  currentStepMs(): number {
-    return this.isDropping ? DROP_STEP_MS : this.stepMs;
+  currentFallMs(): number {
+    return this.isDropping ? DROP_STEP_MS : this.fallMs;
   }
 
   /** Параметры текущей фазы: скорость трубы и пауза перед застыванием. */
@@ -96,82 +126,56 @@ export class Round {
     return phaseParams(this.phase);
   }
 
-  /** Во сколько раз умножатся очки, если змейка застынет такой формы. */
-  multiplier(): number {
-    return shapeMultiplier(countTurns(this.snake));
-  }
+  /** Рисование: голова шагает в сторону dir, тело тянется следом. Срабатывает сразу. */
+  moveHead(dir: Dir): void {
+    if (this.isOver || this.isDropping) return;
+    if (isOpposite(dir, this.dir)) return; // назад, в шею, нельзя
+    const next = move(this.snake[0], dir);
+    if (next.row < 0) return; // выше стакана, обратно в трубу, ползти нельзя
+    if (next.row < this.upLimitRow) return; // выше потолка — не пускает гравитация
+    if (!isFree(this.grid, next) || this.isOwnCell(next)) return;
 
-  /** Кладёт команду в буфер. Повтор и разворот назад игнорируются. */
-  queueDir(dir: Dir): void {
-    if (this.isOver) return;
-    if (dir === 'down' && this.dir === 'down' && this.dirQueue.length === 0) {
-      this.pressDownWhileFalling();
-      return;
-    }
-    if (this.dirQueue.length >= INPUT_BUFFER_SIZE) return;
-
-    const last = this.dirQueue[this.dirQueue.length - 1] ?? this.dir;
-    if (dir === last || isOpposite(dir, last)) return;
-    this.dirQueue.push(dir);
-    // Змейка стоит на опоре — поворачиваем сразу, не дожидаясь следующего шага
-    if (this.isResting) this.stepTimer = this.currentStepMs();
-  }
-
-  /** ↓, когда змейка и так ползёт вниз: в воздухе — ускорить падение, на опоре — застыть сразу. */
-  private pressDownWhileFalling(): void {
-    if (isFree(this.grid, move(this.snake[0], 'down'))) {
-      this.isDropping = true;
-      this.stepTimer = Math.min(this.stepTimer, DROP_STEP_MS); // следующий шаг — уже быстрый
-      return;
-    }
-    this.freeze();
-  }
-
-  /** Один шаг змейки (вызывается каждые stepMs). */
-  private step(): void {
-    this.prevSnake = this.snake.map((cell) => ({ ...cell }));
-    const queued = this.dirQueue.shift();
-    if (queued) this.isDropping = false;
-
-    const moveDir = this.resolveMove(queued ?? this.dir);
-    if (moveDir === null) {
-      this.rest(queued);
-      return;
-    }
-
-    this.dir = moveDir;
-    this.isResting = false;
-    this.restMs = 0;
-    this.snake.unshift(move(this.snake[0], moveDir)); // голова шагает вперёд,
+    this.remember();
+    this.snake.unshift(next); // голова шагает,
     this.snake.pop(); // хвост подтягивается
+    this.dir = dir;
   }
 
-  /** Куда на самом деле шагнёт голова, если ползти в сторону dir. null — некуда. */
-  private resolveMove(dir: Dir): Dir | null {
-    const head = this.snake[0];
-    if (isFree(this.grid, move(head, dir))) return dir;
-    // Упёрлась сбоку — сползает вниз вдоль препятствия
-    if (dir !== 'down' && isFree(this.grid, move(head, 'down'))) return 'down';
-    return null;
+  /** Пробел: фигура падает до опоры в том виде, в каком её оставил игрок, и сразу застывает. */
+  drop(): void {
+    if (this.isOver || this.isDropping) return;
+    this.isDropping = true;
+    this.fallTimer = this.currentFallMs(); // первый шаг броска — в ближайшем кадре
   }
 
-  /**
-   * Змейка упёрлась. Застывает не сразу: lockDelayMs текущей фазы даём на поворот вбок (таймер — в tick()).
-   * Сразу застывает, если игрок сам направил её вниз или повернуть некуда.
-   */
-  private rest(queued: Dir | undefined): void {
-    this.isDropping = false;
-    if (queued === 'down' || !this.canTurnAside()) {
-      this.freeze();
+  /** Гравитация: вся змейка опускается на клетку, сохраняя форму. */
+  private fall(): void {
+    if (this.canFall()) {
+      this.remember();
+      this.snake = this.snake.map((cell) => ({ col: cell.col, row: cell.row + 1 }));
+      this.upLimitRow++; // потолок опускается вместе со змейкой
+      this.isResting = false;
+      this.restMs = 0;
       return;
     }
-    this.isResting = true;
+    // Легла на опору: после броска застывает сразу, иначе — пауза, чтобы дорисовать (таймер — в tick())
+    if (this.isDropping) this.freeze();
+    else this.isResting = true;
   }
 
-  /** Есть ли свободная клетка слева или справа от головы (разворот назад не считается). */
-  private canTurnAside(): boolean {
-    const head = this.snake[0];
-    return SIDE_DIRS.some((dir) => !isOpposite(dir, this.dir) && isFree(this.grid, move(head, dir)));
+  private canFall(): boolean {
+    return this.snake.every((cell) => isFree(this.grid, { col: cell.col, row: cell.row + 1 }));
+  }
+
+  private isOwnCell(target: Cell): boolean {
+    // хвост в этот же момент уходит, поэтому его клетку не считаем
+    return this.snake.slice(0, -1).some((cell) => cell.col === target.col && cell.row === target.row);
+  }
+
+  /** Запоминает позицию до движения — отрисовка плавно доведёт змейку до новой. */
+  private remember(): void {
+    this.prevSnake = this.snake.map((cell) => ({ ...cell }));
+    this.moveAge = 0;
   }
 
   private isSnakeInPipe(): boolean {
@@ -181,31 +185,40 @@ export class Round {
   private freeze(): void {
     this.isResting = false;
     this.restMs = 0;
+    this.isDropping = false;
     // Часть змейки осталась в трубе — стакан переполнен
     if (this.isSnakeInPipe()) {
-      this.gameOver('Змейка не вылезла из трубы');
+      this.gameOver({ title: 'Стакан полон!', text: 'Змейка не вылезла из трубы' });
+      return;
+    }
+    // Нарисована не та фигура — поражение
+    const ordered = this.order();
+    const drawn = shapeOf(this.snake);
+    if (drawn !== ordered) {
+      this.gameOver({ title: 'Не та фигура!', text: 'Змейка застыла не той фигурой', ordered, drawn });
       return;
     }
 
-    const multiplier = this.multiplier();
     const pieceId = this.pieceCount++;
     for (const cell of this.snake) {
       this.grid[cell.row][cell.col] = pieceId;
     }
     this.events.onFreeze(this.snake);
-    this.clearLines(multiplier);
+    this.orders.shift();
+    this.fillOrders();
+    const lines = this.clearLines();
+    this.addProgress(lines, ORDER_BONUS + scoreForLines(lines));
     this.spawnSnake();
+    if (!this.isOver) this.events.onNewOrder(this.order());
   }
 
-  /** Убирает заполненные строки. multiplier — множитель за изгибы змейки, которая их закрыла. */
-  private clearLines(multiplier: number): void {
+  /** Убирает заполненные строки и возвращает, сколько их было. */
+  private clearLines(): number {
     const rows = findFullRows(this.grid);
-    if (rows.length === 0) return;
+    if (rows.length === 0) return 0;
     clearFullRows(this.grid);
-
-    const points = scoreForLines(rows.length, multiplier);
-    this.events.onLinesCleared(rows, points, multiplier);
-    this.addProgress(rows.length, points);
+    this.events.onLinesCleared(rows, scoreForLines(rows.length));
+    return rows.length;
   }
 
   /**
@@ -230,29 +243,34 @@ export class Round {
     this.events.onPhaseChange(phase);
   }
 
+  /** В очереди всегда есть текущий и следующий заказ. */
+  private fillOrders(): void {
+    while (this.orders.length < 2) this.orders.push(...shuffledBag());
+  }
+
   private spawnSnake(): void {
     this.dir = 'down';
-    this.dirQueue = [];
-    this.stepTimer = 0;
+    this.fallTimer = 0;
     this.isResting = false;
     this.restMs = 0;
     this.isDropping = false;
+    this.upLimitRow = -SNAKE_LENGTH;
     this.pipeTimer = 0;
     this.prevPipeCol = this.pipeCol; // труба встаёт ровно над своим столбцом
-    this.stepMs = stepMsForLevel(this.level);
+    this.fallMs = fallMsForLevel(this.level);
 
     // Клетка под трубой занята — новой змейке некуда выползти
     if (!isFree(this.grid, { col: this.pipeCol, row: 0 })) {
       this.snake = [];
       this.prevSnake = [];
-      this.gameOver('Под трубой не осталось места');
+      this.gameOver({ title: 'Стакан полон!', text: 'Под трубой не осталось места' });
       return;
     }
 
     // Голова в верхней клетке поля, тело выше — внутри трубы
-    const length = snakeLengthForLevel(this.level);
-    this.snake = Array.from({ length }, (_, i) => ({ col: this.pipeCol, row: -i }));
+    this.snake = Array.from({ length: SNAKE_LENGTH }, (_, i) => ({ col: this.pipeCol, row: -i }));
     this.prevSnake = this.snake.map((cell) => ({ ...cell }));
+    this.moveAge = 0;
   }
 
   /** Труба ездит над стаканом туда-обратно, но стоит, пока из неё вылезает змейка. */
@@ -270,7 +288,7 @@ export class Round {
     this.pipeCol += this.pipeDir;
   }
 
-  private gameOver(reason: string): void {
+  private gameOver(reason: GameOverReason): void {
     this.isOver = true;
     this.isResting = false;
     this.events.onGameOver(reason);

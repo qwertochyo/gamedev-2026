@@ -13,19 +13,27 @@ const KEY_DIRS: Partial<Record<string, Dir>> = {
   KeyA: 'left',
   ArrowRight: 'right',
   KeyD: 'right',
+  ArrowUp: 'up',
+  KeyW: 'up',
   ArrowDown: 'down',
   KeyS: 'down',
 };
-const RESTART_KEYS = ['KeyR', 'Enter', 'Space'];
+const RESTART_KEYS = ['KeyR', 'Enter'];
+const DROP_KEY = 'Space'; // уронить фигуру; после конца игры — тоже «Ещё раз»
 const PAUSE_KEY = 'Escape';
 
 /** Что значит нажатая клавиша — без учёта того, что сейчас на экране. */
-export type KeyIntent = { type: 'dir'; dir: Dir } | { type: 'pause' } | { type: 'restart' } | { type: 'other' };
+export type KeyIntent =
+  | { type: 'dir'; dir: Dir }
+  | { type: 'drop' }
+  | { type: 'pause' }
+  | { type: 'restart' }
+  | { type: 'other' };
 
 export interface InputHandlers {
   onKey(intent: KeyIntent): void;
-  onSwipe(dir: Dir): void; // палец сдвинулся на SWIPE_MIN_PX — можно вести змейку, не отрывая
-  onTap(): void; // палец или кнопка мыши отпущены
+  onSwipe(dir: Dir): void; // палец сдвинулся на SWIPE_MIN_PX — можно рисовать, не отрывая
+  onTap(): void; // короткое касание или клик без свайпа и не по кнопке
   onHidden(): void; // вкладку или приложение свернули
 }
 
@@ -38,6 +46,7 @@ export function setupInput(scene: Phaser.Scene, handlers: InputHandlers): void {
 
 function keyIntent(code: string): KeyIntent {
   if (code === PAUSE_KEY) return { type: 'pause' };
+  if (code === DROP_KEY) return { type: 'drop' };
   if (RESTART_KEYS.includes(code)) return { type: 'restart' };
   const dir = KEY_DIRS[code];
   return dir ? { type: 'dir', dir } : { type: 'other' };
@@ -47,12 +56,13 @@ function setupKeyboard(scene: Phaser.Scene, handlers: InputHandlers): void {
   const keyboard = scene.input.keyboard;
   if (!keyboard) return;
 
-  keyboard.addCapture('LEFT,RIGHT,DOWN,SPACE');
+  keyboard.addCapture('LEFT,RIGHT,UP,DOWN,SPACE');
   keyboard.on('keydown', (event: KeyboardEvent) => handlers.onKey(keyIntent(event.code)));
 }
 
 function setupSwipes(scene: Phaser.Scene, handlers: InputHandlers): void {
   let swipeStart: { x: number; y: number } | null = null;
+  let swiped = false; // палец уже рисовал — значит, это не тап
 
   // Координаты пальца в игровых пикселях 540×960 (canvas увеличен камерой)
   const toWorld = (pointer: Phaser.Input.Pointer): { x: number; y: number } => {
@@ -62,6 +72,7 @@ function setupSwipes(scene: Phaser.Scene, handlers: InputHandlers): void {
 
   scene.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
     swipeStart = toWorld(pointer);
+    swiped = false;
   });
   scene.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
     if (!swipeStart || !pointer.isDown) return;
@@ -72,12 +83,15 @@ function setupSwipes(scene: Phaser.Scene, handlers: InputHandlers): void {
     if (Math.max(Math.abs(dx), Math.abs(dy)) < SWIPE_MIN_PX) return;
 
     swipeStart = current;
+    swiped = true;
     if (Math.abs(dx) > Math.abs(dy)) handlers.onSwipe(dx < 0 ? 'left' : 'right');
-    else if (dy > 0) handlers.onSwipe('down'); // свайп вверх ничего не делает
+    else handlers.onSwipe(dy < 0 ? 'up' : 'down');
   });
-  scene.input.on('pointerup', () => {
+  // Кнопки («Играть», «II», «Продолжить») обрабатывают нажатие сами — это не тап по полю
+  scene.input.on('pointerup', (_pointer: Phaser.Input.Pointer, overButtons: Phaser.GameObjects.GameObject[]) => {
+    if (!swiped && overButtons.length === 0) handlers.onTap();
     swipeStart = null;
-    handlers.onTap();
+    swiped = false;
   });
 }
 

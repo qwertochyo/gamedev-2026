@@ -111,8 +111,9 @@ const HINT_ALPHA = 0.55;
 
 /** Подсказка в середине стакана. Видна, пока не застыла первая змейка. */
 export function createHint(scene: Scene, isTouch: boolean): Text {
-  const controls = isTouch ? 'Свайпай ← → ↓' : 'Жми ← → ↓';
-  const text = `${controls}\n↓ ещё раз — быстрее\n\nЗмейка застынет,\nкогда упрётся вниз`;
+  const draw = isTouch ? 'Свайпы ← ↑ → ↓ — рисовать' : '← ↑ → ↓ — рисовать';
+  const drop = isTouch ? 'Тап — уронить' : 'Пробел — уронить';
+  const text = `Нарисуй змейкой фигуру\nиз заказа наверху ↑\n\n${draw}\n${drop}`;
   return addText(scene, FIELD_X + FIELD_W / 2, FIELD_Y + FIELD_H / 2, text, 24)
     .setAlign('center')
     .setLineSpacing(6)
@@ -163,11 +164,11 @@ export function showStartScreen(scene: Scene, bestScore: number, isTouch: boolea
   screen.add([left, right, tagline]);
 
   const rules = [
-    isTouch ? 'Свайп ← → ↓ — веди змейку' : '← → ↓ — веди змейку',
-    isTouch ? 'Свайп ↓ ещё раз — быстрее' : '↓ ещё раз — быстрее вниз',
-    'Упёрлась вниз — застынет',
+    'Нарисуй змейкой фигуру из заказа',
+    isTouch ? 'Свайпы ← ↑ → ↓ — рисуй' : '← ↑ → ↓ — рисуй фигуру',
+    isTouch ? 'Тап — уронить фигуру' : 'Пробел — уронить фигуру',
+    'Не та фигура — проигрыш',
     'Заполни ряд — он исчезнет',
-    'Больше изгибов — больше очков',
     'Труба ездит — следи за ней',
   ];
   const rulesTop = 312;
@@ -212,6 +213,7 @@ export function showPauseScreen(scene: Scene, isTouch: boolean, onResume: () => 
 }
 
 export interface GameOverInfo {
+  title: string; // «Стакан полон!» или «Не та фигура!»
   reason: string;
   score: number;
   lines: number;
@@ -228,8 +230,8 @@ export function showGameOverCard(scene: Scene, info: GameOverInfo, isTouch: bool
   const cardY = 480;
   const card = scene.add.container(0, 0).setDepth(DEPTH.overlay + 1);
   card.add(addCard(scene, cardY, 420, 440));
-  card.add(addText(scene, CENTER_X, cardY - 170, 'Стакан полон!', 40, TEXT_COLOR, true).setOrigin(0.5));
-  card.add(addText(scene, CENTER_X, cardY - 126, info.reason, 19, DANGER_TEXT_COLOR).setOrigin(0.5));
+  card.add(addText(scene, CENTER_X, cardY - 170, info.title, 40, TEXT_COLOR, true).setOrigin(0.5));
+  card.add(addText(scene, CENTER_X, cardY - 124, info.reason, 23, DANGER_TEXT_COLOR, true).setOrigin(0.5));
 
   const score = addText(scene, CENTER_X, cardY - 52, '0', 68, TEXT_COLOR, true).setOrigin(0.5);
   card.add([score, addText(scene, CENTER_X, cardY - 4, 'очков', 18, MUTED_COLOR).setOrigin(0.5)]);

@@ -1,6 +1,6 @@
 // Чистая логика Змейтриса: поле, правила и сложность. Без Phaser.
 
-export type Dir = 'left' | 'right' | 'down';
+export type Dir = 'left' | 'right' | 'up' | 'down';
 
 export interface Cell {
   col: number;
@@ -17,18 +17,17 @@ export const SPAWN_COL = 4; // столбец трубы в начале пар�
 export const EMPTY = -1;
 
 // змейка и сложность
-export const START_LENGTH = 4;
-export const MAX_LENGTH = 8;
-export const STEP_MS_START = 350;
-export const STEP_MS_MIN = 140;
-export const STEP_MS_PER_LEVEL = 20;
+export const SNAKE_LENGTH = 4; // змейка из 4 клеток — как фигуры тетриса
+export const FALL_MS_START = 500; // за сколько змейка падает на клетку на 1-м уровне
+export const FALL_MS_MIN = 120;
+export const FALL_MS_PER_LEVEL = 30; // на столько быстрее с каждым уровнем
 export const LINES_PER_LEVEL = 5;
-export const LINE_SCORE_BASE = 100; // очки = база × линии × множитель за изгибы
-export const MULTIPLIER_PER_TURN = 1; // каждый изгиб змейки добавляет к множителю: прямая ×1, Г ×2, Z ×3
-export const DROP_STEP_MS = 40; // шаг ускоренного падения (↓, когда змейка и так ползёт вниз)
+export const LINE_SCORE_BASE = 100; // очки за линию
+export const ORDER_BONUS = 20; // очки за каждую фигуру, совпавшую с заказом
+export const DROP_STEP_MS = 20; // шаг броска (пробел): фигура падает до опоры почти мгновенно
 
 // Фазы. Правила в обеих одинаковые — с ростом очков меняются только параметры.
-// Уровни (по линиям) меняют длину и скорость змейки, фазы (по очкам) — трубу и застывание.
+// Уровни (по линиям) меняют скорость падения, фазы (по очкам) — трубу и застывание.
 export const PHASE_2_AT_SCORE = 1000; // фаза 2 с 1000 очков (примерно 5–10 линий)
 
 export interface PhaseParams {
@@ -50,6 +49,7 @@ function createEmptyRow(): number[] {
 export function move(cell: Cell, dir: Dir): Cell {
   if (dir === 'left') return { col: cell.col - 1, row: cell.row };
   if (dir === 'right') return { col: cell.col + 1, row: cell.row };
+  if (dir === 'up') return { col: cell.col, row: cell.row - 1 };
   return { col: cell.col, row: cell.row + 1 };
 }
 
@@ -61,9 +61,14 @@ export function isFree(grid: Grid, cell: Cell): boolean {
   return grid[cell.row][cell.col] === EMPTY;
 }
 
-/** Вверх двигаться нельзя, поэтому противоположны только «влево» и «вправо». */
+/** Противоположные направления: голова не может развернуться назад, в шею. */
 export function isOpposite(a: Dir, b: Dir): boolean {
-  return (a === 'left' && b === 'right') || (a === 'right' && b === 'left');
+  return (
+    (a === 'left' && b === 'right') ||
+    (a === 'right' && b === 'left') ||
+    (a === 'up' && b === 'down') ||
+    (a === 'down' && b === 'up')
+  );
 }
 
 /** Номера заполненных строк. */
@@ -86,35 +91,12 @@ export function clearFullRows(grid: Grid): number {
   return cleared;
 }
 
-/** Сколько раз тело змейки меняет направление: прямая — 0, Г — 1, Z — 2. */
-export function countTurns(snake: Cell[]): number {
-  let turns = 0;
-  for (let i = 2; i < snake.length; i++) {
-    const [a, b, c] = [snake[i - 2], snake[i - 1], snake[i]];
-    const isStraight = b.col - a.col === c.col - b.col && b.row - a.row === c.row - b.row;
-    if (!isStraight) turns++;
-  }
-  return turns;
-}
-
-/**
- * Множитель очков за форму змейки. Прямую ставить проще всего и безопаснее всего,
- * поэтому она приносит меньше: изогнутые фигуры — риск, но и награда больше.
- */
-export function shapeMultiplier(turns: number): number {
-  return 1 + turns * MULTIPLIER_PER_TURN;
-}
-
-export function scoreForLines(lines: number, multiplier: number): number {
-  return LINE_SCORE_BASE * lines * multiplier;
+export function scoreForLines(lines: number): number {
+  return LINE_SCORE_BASE * lines;
 }
 
 export function levelForLines(lines: number): number {
   return 1 + Math.floor(lines / LINES_PER_LEVEL);
-}
-
-export function snakeLengthForLevel(level: number): number {
-  return Math.min(START_LENGTH + level - 1, MAX_LENGTH);
 }
 
 /** Номер фазы по очкам: 1 или 2. */
@@ -126,6 +108,70 @@ export function phaseParams(phase: number): PhaseParams {
   return phase === 1 ? PHASE_1 : PHASE_2;
 }
 
-export function stepMsForLevel(level: number): number {
-  return Math.max(STEP_MS_MIN, STEP_MS_START - (level - 1) * STEP_MS_PER_LEVEL);
+export function fallMsForLevel(level: number): number {
+  return Math.max(FALL_MS_MIN, FALL_MS_START - (level - 1) * FALL_MS_PER_LEVEL);
+}
+
+// ---------- фигуры и заказы ----------
+
+/** Фигуры тетриса, которые можно нарисовать змейкой. Т нельзя: у змейки нет развилок. */
+export type ShapeId = 'I' | 'O' | 'L' | 'J' | 'S' | 'Z';
+export const SHAPE_IDS: ShapeId[] = ['I', 'O', 'L', 'J', 'S', 'Z'];
+
+/** Клетки фигур в «лежачем» виде — так их удобно показывать на панели. */
+export const SHAPES: Record<ShapeId, Cell[]> = {
+  I: cells([0, 0], [1, 0], [2, 0], [3, 0]),
+  O: cells([0, 0], [1, 0], [0, 1], [1, 1]),
+  L: cells([2, 0], [0, 1], [1, 1], [2, 1]),
+  J: cells([0, 0], [0, 1], [1, 1], [2, 1]),
+  S: cells([1, 0], [2, 0], [0, 1], [1, 1]),
+  Z: cells([0, 0], [1, 0], [1, 1], [2, 1]),
+};
+
+function cells(...pairs: [number, number][]): Cell[] {
+  return pairs.map(([col, row]) => ({ col, row }));
+}
+
+/** Форма без привязки к месту: клетки сдвинуты к нулю и отсортированы. */
+function shapeKey(shape: Cell[]): string {
+  const minCol = Math.min(...shape.map((c) => c.col));
+  const minRow = Math.min(...shape.map((c) => c.row));
+  return shape
+    .map((c) => `${c.col - minCol},${c.row - minRow}`)
+    .sort()
+    .join(' ');
+}
+
+/** Поворот на 90°: (col, row) → (−row, col). */
+function rotate(shape: Cell[]): Cell[] {
+  return shape.map((c) => ({ col: -c.row, row: c.col }));
+}
+
+/** Все 4 поворота каждой фигуры. Зеркальные L/J и S/Z — разные фигуры, как в тетрисе. */
+const SHAPE_KEYS: Record<ShapeId, string[]> = Object.fromEntries(
+  SHAPE_IDS.map((id) => {
+    let shape = SHAPES[id];
+    const keys: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      keys.push(shapeKey(shape));
+      shape = rotate(shape);
+    }
+    return [id, keys];
+  }),
+) as Record<ShapeId, string[]>;
+
+/** Какую фигуру образуют клетки змейки (с учётом поворота). null — не фигура тетриса. */
+export function shapeOf(snake: Cell[]): ShapeId | null {
+  const key = shapeKey(snake);
+  return SHAPE_IDS.find((id) => SHAPE_KEYS[id].includes(key)) ?? null;
+}
+
+/** «Мешок» заказов, как в тетрисе: все фигуры по разу в случайном порядке. */
+export function shuffledBag(): ShapeId[] {
+  const bag = [...SHAPE_IDS];
+  for (let i = bag.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [bag[i], bag[j]] = [bag[j], bag[i]];
+  }
+  return bag;
 }
