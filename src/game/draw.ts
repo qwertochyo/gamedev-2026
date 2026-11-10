@@ -1,7 +1,21 @@
-// Отрисовка стакана, блоков, змейки и трубы. Только рисование — правила в logic.ts и round.ts.
+// Отрисовка стакана, блоков, змейки, трубы и мастерской. Только рисование — правила в logic.ts и round.ts.
 
 import Phaser from 'phaser';
-import { COLS, DROP_STEP_MS, EMPTY, ROWS, SNAKE_LENGTH, columnTop, move, type Cell, type Dir, type Grid } from './logic';
+import {
+  COLS,
+  DROP_STEP_MS,
+  EMPTY,
+  ROWS,
+  SHAPES,
+  SNAKE_LENGTH,
+  WORKSHOP_ENTRY_COL,
+  WORKSHOP_SIZE,
+  columnTop,
+  move,
+  type Cell,
+  type Dir,
+  type Grid,
+} from './logic';
 import type { Round } from './round';
 
 // экран: игра живёт в координатах 540×960, а canvas в RENDER_SCALE раз больше,
@@ -20,6 +34,24 @@ const CELL_GAP = 2; // зазор между соседними клетками
 const CELL_SIZE = CELL - CELL_GAP * 2;
 const CELL_RADIUS = 8;
 const FIELD_PADDING = 3;
+
+// мастерская (этап 1): карточка поверх верхней части стакана; клетки того же размера, что в стакане
+const WORKSHOP_COL0 = 0.5; // левый край поля мастерской — в клетках стакана
+const WORKSHOP_ROW0 = 1.25; // верхний край
+const WORKSHOP_X = FIELD_X + WORKSHOP_COL0 * CELL;
+export const WORKSHOP_Y = FIELD_Y + WORKSHOP_ROW0 * CELL;
+const WORKSHOP_PX = WORKSHOP_SIZE * CELL;
+const WORKSHOP_CARD_MARGIN = 10; // карточка чуть уже стакана
+const WORKSHOP_CARD_PADDING = 24;
+export const WORKSHOP_CENTER_X = WORKSHOP_X + WORKSHOP_PX / 2;
+export const WORKSHOP_CENTER_Y = WORKSHOP_Y + WORKSHOP_PX / 2;
+// справа от поля мастерской — заказ и полоска времени
+export const ORDER_INFO_X = (WORKSHOP_X + WORKSHOP_PX + FIELD_X + FIELD_W) / 2;
+const ORDER_INFO_Y = WORKSHOP_Y + 80;
+const ORDER_INFO_CELL = 30;
+export const TIMER_Y = WORKSHOP_Y + 170;
+const TIMER_W = 140;
+const TIMER_H = 12;
 
 // труба
 const PIPE_TOP = 102;
@@ -54,11 +86,17 @@ const BEAM_DANGER_ALPHA = 0.14;
 const SHINE_ALPHA = 0.25; // блик на верхнем крае клетки
 const EYE_WHITE = 0xffffff;
 const PUPIL_COLOR = 0x0f172a;
+export const ORDER_COLOR = 0xfde047; // заказанная фигура — жёлтая везде: в панели и в мастерской
+const DIM_COLOR = 0x020617; // стакан затемнён, пока собирают заказ
+const DIM_ALPHA = 0.6; // блоки видно: пока рисуешь, можно прикинуть, куда ставить
+const CARD_COLOR = 0x0f172a;
+const TIMER_COLOR = 0x22c55e; // полоска времени: зелёная, к концу краснеет
 
 // плавность и мигание
 const SLIDE_MS = 90; // за сколько змейка доезжает до новой клетки после шага или падения
 const PIPE_SLIDE_MS = 160; // за сколько труба переезжает на соседний столбец
-const HARDEN_MAX = 0.75; // насколько змейка перекрашивается, пока стоит на опоре
+const HARDEN_MAX = 0.75; // насколько фигура перекрашивается, пока стоит на опоре
+const PIECE_TINT = 0.5; // фигура в стакане сразу наполовину в цвете будущего блока — видно, что это уже не змейка
 const DANGER_PULSE_MS = 140; // скорость мигания трубы, когда под ней мало места
 
 type Graphics = Phaser.GameObjects.Graphics;
@@ -152,14 +190,13 @@ interface SnakeLook {
 
 /**
  * Живая змейка. Клетки могут быть дробными — змейка плавно переползает.
- * Клетки целиком в трубе (выше поля) не рисуются; то, что чуть выше поля, закроет труба.
+ * Клетки, где isVisible = false (ещё во входе), не рисуются; то, что чуть выглядывает, закроет труба.
  */
-function drawSnake(g: Graphics, cells: Cell[], look: SnakeLook): void {
+function drawSnake(g: Graphics, cells: Cell[], look: SnakeLook, isVisible: (cell: Cell) => boolean): void {
   if (cells.length === 0) return;
 
   const colorAt = (i: number): number =>
     i === 0 ? look.head : lerpColor(look.body, 0x000000, (TAIL_DARKEN * i) / cells.length);
-  const isVisible = (cell: Cell): boolean => cell.row > -1;
 
   for (let i = cells.length - 1; i > 0; i--) {
     // Перемычку рисуем, только если видны обе клетки: иначе она торчит из трубы вверх
@@ -239,20 +276,68 @@ export function drawCellsFlash(g: Graphics, cells: Cell[]): void {
 
 // ---------- партия целиком ----------
 
-/**
- * Рисует стакан, змейку и трубу партии заново — каждый кадр, поэтому движение плавное.
- * Возвращает, где змейка сейчас на экране (клетки могут быть дробными).
- */
-export function drawRound(g: Graphics, round: Round, timeMs: number): Cell[] {
+/** Рисует партию заново — каждый кадр, поэтому движение плавное. */
+export function drawRound(g: Graphics, round: Round, timeMs: number): void {
   g.clear();
   const pipeX = pipeVisualCol(round);
   const danger = dangerLevel(round, timeMs);
   drawBeam(g, pipeX, columnTop(round.grid, round.pipeCol), danger);
   drawBlocks(g, round.grid);
-  const snakeCells = snakeVisualCells(round);
-  drawSnake(g, snakeCells, snakeLook(round));
+  if (round.stage === 'place') drawSnake(g, snakeVisualCells(round), pieceLook(round), () => true);
   drawPipe(g, pipeX, danger);
-  return snakeCells;
+  if (round.stage === 'draw') drawWorkshop(g, round);
+}
+
+/** Этап 1: стакан затемнён, сверху карточка — поле мастерской со змейкой, заказ и полоска времени. */
+function drawWorkshop(g: Graphics, round: Round): void {
+  g.fillStyle(DIM_COLOR, DIM_ALPHA);
+  g.fillRect(FIELD_X, FIELD_Y, FIELD_W, FIELD_H);
+
+  const cardX = FIELD_X + WORKSHOP_CARD_MARGIN;
+  const cardY = WORKSHOP_Y - WORKSHOP_CARD_PADDING;
+  const cardW = FIELD_W - WORKSHOP_CARD_MARGIN * 2;
+  const cardH = WORKSHOP_PX + WORKSHOP_CARD_PADDING * 2;
+  g.fillStyle(CARD_COLOR);
+  g.fillRoundedRect(cardX, cardY, cardW, cardH, 16);
+  g.lineStyle(2, FRAME_COLOR);
+  g.strokeRoundedRect(cardX, cardY, cardW, cardH, 16);
+
+  g.fillStyle(FIELD_COLOR);
+  g.fillRoundedRect(WORKSHOP_X - 4, WORKSHOP_Y - 4, WORKSHOP_PX + 8, WORKSHOP_PX + 8, 8);
+  g.fillStyle(GRID_DOT_COLOR);
+  for (let row = 1; row < WORKSHOP_SIZE; row++) {
+    for (let col = 1; col < WORKSHOP_SIZE; col++) {
+      g.fillCircle(WORKSHOP_X + col * CELL, WORKSHOP_Y + row * CELL, 1.5);
+    }
+  }
+
+  drawShape(g, SHAPES[round.order()], ORDER_INFO_X, ORDER_INFO_Y, ORDER_INFO_CELL, ORDER_COLOR);
+  drawTimer(g, round.drawMs > 0 ? round.drawMsLeft / round.drawMs : 0);
+
+  // Змейка в координатах мастерской → в координатах стакана (клетки того же размера)
+  const cells = snakeVisualCells(round).map((cell) => ({ col: cell.col + WORKSHOP_COL0, row: cell.row + WORKSHOP_ROW0 }));
+  drawSnake(g, cells, workshopLook(round), (cell) => cell.row - WORKSHOP_ROW0 > -1);
+  drawWorkshopEntry(g);
+}
+
+/** Полоска оставшегося времени: left = 1 — время только пошло, 0 — вышло. */
+function drawTimer(g: Graphics, left: number): void {
+  const x = ORDER_INFO_X - TIMER_W / 2;
+  g.fillStyle(GRID_DOT_COLOR);
+  g.fillRoundedRect(x, TIMER_Y, TIMER_W, TIMER_H, TIMER_H / 2);
+  if (left <= 0) return;
+  g.fillStyle(lerpColor(DANGER_COLOR, TIMER_COLOR, left));
+  g.fillRoundedRect(x, TIMER_Y, Math.max(TIMER_H, TIMER_W * left), TIMER_H, TIMER_H / 2);
+}
+
+/** Короткая труба над мастерской: из неё выползает змейка и прячет хвост, который ещё не вылез. */
+function drawWorkshopEntry(g: Graphics): void {
+  const x = WORKSHOP_X + WORKSHOP_ENTRY_COL * CELL;
+  const top = WORKSHOP_Y - CELL;
+  g.fillStyle(PIPE_COLOR);
+  g.fillRect(x - PIPE_WALL, top, CELL + PIPE_WALL * 2, CELL - 4);
+  g.fillStyle(FIELD_COLOR);
+  g.fillRect(x, top, CELL, CELL);
 }
 
 /** Змейка между прошлой и текущей клетками: доезжает за SLIDE_MS после движения (при броске — быстрее). */
@@ -270,19 +355,26 @@ function pipeVisualCol(round: Round): number {
   return round.prevPipeCol + (round.pipeCol - round.prevPipeCol) * t;
 }
 
-/** 0…1 — насколько красной рисовать трубу. Мигает, если змейка не вылезет из неё прямо вниз. */
+/** 0…1 — насколько красной рисовать трубу. Мигает, если под ней почти нет места для новой фигуры. */
 function dangerLevel(round: Round, timeMs: number): number {
   if (round.isOver) return 1;
   const isDanger = columnTop(round.grid, round.pipeCol) < SNAKE_LENGTH;
   return isDanger ? 0.5 + 0.5 * Math.sin(timeMs / DANGER_PULSE_MS) : 0;
 }
 
-function snakeLook(round: Round): SnakeLook {
-  const lookDir = round.dir; // глаза смотрят туда, куда последний раз шагнула голова
+/** Змейка в мастерской — зелёная, глаза смотрят туда, куда последний раз шагнула голова. */
+function workshopLook(round: Round): SnakeLook {
+  if (round.isOver) return { body: DEAD_COLOR, head: DEAD_HEAD_COLOR, lookDir: round.dir, isDead: true };
+  return { body: SNAKE_COLOR, head: HEAD_COLOR, lookDir: round.dir, isDead: false };
+}
+
+/** Фигура в стакане — наполовину в цвете будущего блока и «твердеет», пока лежит на опоре. */
+function pieceLook(round: Round): SnakeLook {
+  const lookDir = round.dir;
   if (round.isOver) return { body: DEAD_COLOR, head: DEAD_HEAD_COLOR, lookDir, isDead: true };
 
-  // Пока змейка стоит на опоре, она «твердеет» — перекрашивается в цвет будущих блоков
-  const hardness = round.isResting ? (round.restMs / round.params().lockDelayMs) * HARDEN_MAX : 0;
+  const restHardness = round.isResting ? (round.restMs / round.params().lockDelayMs) * HARDEN_MAX : 0;
+  const hardness = Math.max(PIECE_TINT, restHardness);
   const target = pieceColor(round.pieceCount);
   return {
     body: lerpColor(SNAKE_COLOR, target, hardness),

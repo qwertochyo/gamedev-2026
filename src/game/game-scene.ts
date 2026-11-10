@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import type { Dir } from './logic';
 import { GAME_HEIGHT, GAME_WIDTH, RENDER_SCALE, drawBackground, drawRound } from './draw';
-import { MatchBadge, celebrateLines, flashCells, gameOverFeedback, showLevelUpBanner, showPhaseBanner } from './effects';
+import { celebrateLines, celebrateOrder, flashCells, gameOverFeedback, showLevelUpBanner, showPhaseBanner } from './effects';
 import { Hud } from './hud';
 import { IS_TOUCH, setupInput, type KeyIntent } from './input';
 import { Round, type GameOverReason, type RoundEvents } from './round';
@@ -9,7 +9,7 @@ import { loadBestScore, saveBestScore } from './storage';
 import { createHint, hideHint, showGameOverCard, showHint, showPauseScreen, showStartScreen } from './ui';
 
 const MAX_FRAME_DELTA_MS = 100; // защита от рывка после переключения вкладки
-const GAME_OVER_DELAY_MS = 800; // пауза перед карточкой конца: видно, где застряла змейка
+const GAME_OVER_DELAY_MS = 800; // пауза перед карточкой конца: видно, что произошло
 
 interface SceneData {
   skipIntro?: boolean; // при «Ещё раз» стартовый экран не показываем
@@ -24,7 +24,6 @@ interface SceneData {
 export class GameScene extends Phaser.Scene {
   private round!: Round;
   private board!: Phaser.GameObjects.Graphics;
-  private badge!: MatchBadge;
   private hud!: Hud;
   private hint!: Phaser.GameObjects.Text;
 
@@ -54,9 +53,8 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.setZoom(RENDER_SCALE).centerOn(GAME_WIDTH / 2, GAME_HEIGHT / 2);
     drawBackground(this.add.graphics());
     this.board = this.add.graphics();
-    this.badge = new MatchBadge(this);
     this.hud = new Hud(this, () => this.pause());
-    this.hud.update(this.round, this.bestScore, false);
+    this.hud.update(this.round, this.bestScore);
     this.hint = createHint(this, IS_TOUCH);
     setupInput(this, {
       onKey: (intent) => this.handleKey(intent),
@@ -67,7 +65,6 @@ export class GameScene extends Phaser.Scene {
 
     if (data.skipIntro) {
       this.isStarted = true;
-      this.hud.showNewOrder(this.round.order());
     } else {
       this.hint.setAlpha(0); // подсказка появится, когда уберём стартовый экран
       this.closeStartScreen = showStartScreen(this, this.bestScore, IS_TOUCH, () => this.startGame());
@@ -75,17 +72,18 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number): void {
-    // На паузе правила стоят: змейка, труба и таймер застывания не двигаются
+    // На паузе правила стоят: змейка, фигура, труба и таймеры не двигаются
     if (this.isStarted && !this.isPaused && !this.round.isOver) {
       this.round.tick(Math.min(delta, MAX_FRAME_DELTA_MS));
     }
-    const snakeCells = drawRound(this.board, this.round, this.time.now);
-    this.badge.update(snakeCells, this.round);
+    drawRound(this.board, this.round, this.time.now);
+    this.hud.updateWorkshop(this.round);
   }
 
   /** Как сцена откликается на события партии. */
   private roundEvents(): RoundEvents {
     return {
+      onOrderDone: (points) => celebrateOrder(this, points),
       onFreeze: (cells) => {
         flashCells(this, cells);
         hideHint(this, this.hint);
@@ -96,8 +94,7 @@ export class GameScene extends Phaser.Scene {
         this.hud.bumpLevel();
       },
       onPhaseChange: (phase) => showPhaseBanner(this, phase),
-      onScoreChange: () => this.hud.update(this.round, this.bestScore, true),
-      onNewOrder: (shape) => this.hud.showNewOrder(shape),
+      onScoreChange: () => this.hud.update(this.round, this.bestScore),
       onGameOver: (reason) => this.gameOver(reason),
     };
   }
@@ -110,7 +107,6 @@ export class GameScene extends Phaser.Scene {
     this.closeStartScreen?.();
     this.closeStartScreen = null;
     showHint(this, this.hint);
-    this.hud.showNewOrder(this.round.order());
   }
 
   /** Esc: поставить на паузу или продолжить. На стартовом экране и после конца игры не действует. */
@@ -139,11 +135,11 @@ export class GameScene extends Phaser.Scene {
       this.bestScore = score;
       saveBestScore(score);
     }
-    this.hud.update(this.round, this.bestScore, false);
+    this.hud.update(this.round, this.bestScore);
     gameOverFeedback(this);
 
     const info = { title: reason.title, reason: reason.text, score, lines, level, bestScore: this.bestScore, isNewBest };
-    // Небольшая пауза: игрок успевает увидеть, где застряла змейка
+    // Небольшая пауза: игрок успевает увидеть, что произошло
     this.time.delayedCall(GAME_OVER_DELAY_MS, () => {
       showGameOverCard(this, info, IS_TOUCH, () => this.restart());
       this.canRestart = true;
@@ -158,7 +154,7 @@ export class GameScene extends Phaser.Scene {
 
   // ---------- ввод ----------
 
-  /** Клавиша: Esc — пауза; на стартовом экране — любая клавиша; в игре стрелки рисуют, пробел роняет; после конца — R, Enter, пробел. */
+  /** Клавиша: Esc — пауза; на стартовом экране — любая клавиша; в игре стрелки рисуют и двигают, пробел роняет; после конца — R, Enter, пробел. */
   private handleKey(intent: KeyIntent): void {
     if (intent.type === 'pause') {
       this.togglePause();
@@ -182,13 +178,13 @@ export class GameScene extends Phaser.Scene {
     else this.handleDrop();
   }
 
-  /** Стрелка или свайп: голова змейки шагает и дорисовывает фигуру. После конца игры партия сама игнорирует. */
+  /** Стрелка или свайп: в мастерской шагает голова змейки, в стакане двигается или крутится фигура. */
   private handleDir(dir: Dir): void {
     if (!this.isStarted || this.isPaused) return;
-    this.round.moveHead(dir);
+    this.round.steer(dir);
   }
 
-  /** Пробел или тап: уронить фигуру в том виде, как она есть. */
+  /** Пробел или тап: уронить фигуру в стакане. */
   private handleDrop(): void {
     if (!this.isStarted || this.isPaused) return;
     this.round.drop();

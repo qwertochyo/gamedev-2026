@@ -109,11 +109,12 @@ export function showBanner(scene: Scene, title: string, subtitle: string, y = FI
 
 const HINT_ALPHA = 0.55;
 
-/** Подсказка в середине стакана. Видна, пока не застыла первая змейка. */
+/** Подсказка в середине стакана. Видна, пока не застыла первая фигура. */
 export function createHint(scene: Scene, isTouch: boolean): Text {
-  const draw = isTouch ? 'Свайпы ← ↑ → ↓ — рисовать' : '← ↑ → ↓ — рисовать';
+  const draw = isTouch ? 'Свайпы — рисовать' : '← ↑ → ↓ — рисовать';
+  const steer = isTouch ? 'В стакане: свайпы двигают, ↑ крутит' : 'В стакане: ← → двигать, ↑ крутить';
   const drop = isTouch ? 'Тап — уронить' : 'Пробел — уронить';
-  const text = `Нарисуй змейкой фигуру\nиз заказа наверху ↑\n\n${draw}\n${drop}`;
+  const text = `Собери змейкой фигуру из заказа,\nпока не кончилось время\n\n${draw}\n${steer}\n${drop}`;
   return addText(scene, FIELD_X + FIELD_W / 2, FIELD_Y + FIELD_H / 2, text, 24)
     .setAlign('center')
     .setLineSpacing(6)
@@ -160,16 +161,17 @@ export function showStartScreen(scene: Scene, bestScore: number, isTouch: boolea
   const shift = (left.width - right.width) / 2;
   left.x += shift;
   right.x += shift;
-  const tagline = addText(scene, CENTER_X, 262, 'Змейка падает в стакан тетриса', 22, MUTED_COLOR).setOrigin(0.5);
+  const tagline = addText(scene, CENTER_X, 262, 'Змейка собирает фигуры для тетриса', 22, MUTED_COLOR).setOrigin(0.5);
   screen.add([left, right, tagline]);
 
   const rules = [
-    'Нарисуй змейкой фигуру из заказа',
+    'Собери змейкой фигуру из заказа',
     isTouch ? 'Свайпы ← ↑ → ↓ — рисуй' : '← ↑ → ↓ — рисуй фигуру',
+    'Не успел за время — проигрыш',
+    isTouch ? 'В стакане: свайпы двигают, ↑ крутит' : 'В стакане: ← → двигай, ↑ крути',
     isTouch ? 'Тап — уронить фигуру' : 'Пробел — уронить фигуру',
-    'Не та фигура — проигрыш',
     'Заполни ряд — он исчезнет',
-    'Труба ездит — следи за ней',
+    'Фигура появится под трубой',
   ];
   const rulesTop = 312;
   const rowHeight = 46;
@@ -213,7 +215,7 @@ export function showPauseScreen(scene: Scene, isTouch: boolean, onResume: () => 
 }
 
 export interface GameOverInfo {
-  title: string; // «Стакан полон!» или «Не та фигура!»
+  title: string; // «Время вышло!» или «Стакан полон!»
   reason: string;
   score: number;
   lines: number;

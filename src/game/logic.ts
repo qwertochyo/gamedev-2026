@@ -23,20 +23,28 @@ export const FALL_MS_MIN = 120;
 export const FALL_MS_PER_LEVEL = 30; // на столько быстрее с каждым уровнем
 export const LINES_PER_LEVEL = 5;
 export const LINE_SCORE_BASE = 100; // очки за линию
-export const ORDER_BONUS = 20; // очки за каждую фигуру, совпавшую с заказом
+export const ORDER_BONUS = 20; // очки за каждый собранный заказ
 export const DROP_STEP_MS = 20; // шаг броска (пробел): фигура падает до опоры почти мгновенно
 
+// Этап 1 — мастерская: змейка ползает по полю 5×5 без гравитации и собирает заказ, пока идёт таймер
+export const WORKSHOP_SIZE = 5;
+export const WORKSHOP_ENTRY_COL = 2; // змейка выползает в мастерскую сверху, посередине
+export const DRAW_MS_START = 8000; // время на заказ на 1-м уровне
+export const DRAW_MS_PER_LEVEL = 500; // на столько меньше с каждым уровнем
+export const DRAW_MS_MIN = 4000;
+
 // Фазы. Правила в обеих одинаковые — с ростом очков меняются только параметры.
-// Уровни (по линиям) меняют скорость падения, фазы (по очкам) — трубу и застывание.
+// Уровни (по линиям) меняют скорость падения и время на заказ, фазы (по очкам) — трубу, застывание и время на заказ.
 export const PHASE_2_AT_SCORE = 1000; // фаза 2 с 1000 очков (примерно 5–10 линий)
 
 export interface PhaseParams {
   pipeStepMs: number; // за сколько труба сдвигается на столбец
-  lockDelayMs: number; // сколько змейка стоит на опоре, прежде чем застыть
+  lockDelayMs: number; // сколько фигура стоит на опоре, прежде чем застыть
+  drawTimeFactor: number; // во сколько раз меньше времени на заказ, чем по уровню
 }
 
-const PHASE_1: PhaseParams = { pipeStepMs: 450, lockDelayMs: 600 };
-const PHASE_2: PhaseParams = { pipeStepMs: 280, lockDelayMs: 350 };
+const PHASE_1: PhaseParams = { pipeStepMs: 450, lockDelayMs: 600, drawTimeFactor: 1 };
+const PHASE_2: PhaseParams = { pipeStepMs: 280, lockDelayMs: 350, drawTimeFactor: 0.75 };
 
 export function createGrid(): Grid {
   return Array.from({ length: ROWS }, () => createEmptyRow());
@@ -112,6 +120,16 @@ export function fallMsForLevel(level: number): number {
   return Math.max(FALL_MS_MIN, FALL_MS_START - (level - 1) * FALL_MS_PER_LEVEL);
 }
 
+/** Сколько мс на заказ на этом уровне (до поправки фазы). */
+export function drawMsForLevel(level: number): number {
+  return Math.max(DRAW_MS_MIN, DRAW_MS_START - (level - 1) * DRAW_MS_PER_LEVEL);
+}
+
+/** Клетка внутри мастерской 5×5. */
+export function isInWorkshop(cell: Cell): boolean {
+  return cell.col >= 0 && cell.col < WORKSHOP_SIZE && cell.row >= 0 && cell.row < WORKSHOP_SIZE;
+}
+
 // ---------- фигуры и заказы ----------
 
 /** Фигуры тетриса, которые можно нарисовать змейкой. Т нельзя: у змейки нет развилок. */
@@ -164,6 +182,25 @@ const SHAPE_KEYS: Record<ShapeId, string[]> = Object.fromEntries(
 export function shapeOf(snake: Cell[]): ShapeId | null {
   const key = shapeKey(snake);
   return SHAPE_IDS.find((id) => SHAPE_KEYS[id].includes(key)) ?? null;
+}
+
+// Поворот фигуры в стакане (↑): вокруг второй клетки змейки — шеи, она всегда внутри фигуры.
+// Вокруг одной и той же клетки четыре поворота возвращают фигуру ровно на место, она не «уползает»
+export const ROTATE_PIVOT_INDEX = 1;
+// Поворот упёрся в стенку, блоки или верх стакана — пробуем сдвинуть фигуру на клетку-две вбок или вниз.
+// Вверх не сдвигаем никогда: так поворотом нельзя «подпрыгнуть» и висеть в воздухе
+export const ROTATE_KICKS: Cell[] = cells([0, 0], [-1, 0], [1, 0], [-2, 0], [2, 0], [0, 1], [0, 2]);
+
+/** Поворот клеток на 90° по часовой вокруг клетки pivot. Порядок клеток (голова первая) не меняется. */
+export function rotateAround(cells: Cell[], pivot: Cell): Cell[] {
+  return cells.map((c) => ({ col: pivot.col - (c.row - pivot.row), row: pivot.row + (c.col - pivot.col) }));
+}
+
+const CLOCKWISE: Record<Dir, Dir> = { up: 'right', right: 'down', down: 'left', left: 'up' };
+
+/** Куда смотрит голова, когда фигуру повернули по часовой. */
+export function turnClockwise(dir: Dir): Dir {
+  return CLOCKWISE[dir];
 }
 
 /** «Мешок» заказов, как в тетрисе: все фигуры по разу в случайном порядке. */
