@@ -1,5 +1,5 @@
 // Ввод: клавиатура, свайпы и сворачивание вкладки. Переводит события браузера в понятные команды,
-// а что с ними делать (старт, пауза, поворот), решает сцена.
+// а что с ними делать (старт, пауза, звук, ход), решает сцена.
 
 import Phaser from 'phaser';
 import type { Dir } from './logic';
@@ -21,12 +21,14 @@ const KEY_DIRS: Partial<Record<string, Dir>> = {
 const RESTART_KEYS = ['KeyR', 'Enter'];
 const DROP_KEY = 'Space'; // уронить фигуру; после конца игры — тоже «Ещё раз»
 const PAUSE_KEY = 'Escape';
+const MUTE_KEY = 'KeyM'; // звук вкл/выкл
 
 /** Что значит нажатая клавиша — без учёта того, что сейчас на экране. */
 export type KeyIntent =
   | { type: 'dir'; dir: Dir }
   | { type: 'drop' }
   | { type: 'pause' }
+  | { type: 'mute' }
   | { type: 'restart' }
   | { type: 'other' };
 
@@ -46,6 +48,7 @@ export function setupInput(scene: Phaser.Scene, handlers: InputHandlers): void {
 
 function keyIntent(code: string): KeyIntent {
   if (code === PAUSE_KEY) return { type: 'pause' };
+  if (code === MUTE_KEY) return { type: 'mute' };
   if (code === DROP_KEY) return { type: 'drop' };
   if (RESTART_KEYS.includes(code)) return { type: 'restart' };
   const dir = KEY_DIRS[code];

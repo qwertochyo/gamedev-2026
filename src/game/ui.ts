@@ -2,6 +2,7 @@
 
 import Phaser from 'phaser';
 import { FIELD_H, FIELD_W, FIELD_X, FIELD_Y, GAME_HEIGHT, GAME_WIDTH, PALETTE, RENDER_SCALE } from './draw';
+import { isMuted, toggleMuted } from './sound';
 
 export const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 export const TEXT_COLOR = '#f8fafc';
@@ -180,7 +181,7 @@ export function showStartScreen(scene: Scene, bestScore: number, isTouch: boolea
 
   const footer = isTouch
     ? ['или коснись экрана', 'Пауза — кнопка справа вверху']
-    : ['или нажми любую клавишу', 'Esc — пауза'];
+    : ['или нажми любую клавишу', 'Esc — пауза · M — звук'];
   if (bestScore > 0) footer.push(`Рекорд: ${bestScore}`);
   screen.add(addText(scene, CENTER_X, buttonY + 80, footer.join('\n'), 18, MUTED_COLOR).setOrigin(0.5, 0).setAlign('center').setLineSpacing(8));
 
@@ -193,14 +194,24 @@ export function showStartScreen(scene: Scene, bestScore: number, isTouch: boolea
 export function showPauseScreen(scene: Scene, isTouch: boolean, onResume: () => void): () => void {
   const screen = scene.add.container(0, 0).setDepth(DEPTH.overlay).setAlpha(0);
   screen.add(addOverlay(scene, 0.7));
-  screen.add(addCard(scene, 480, 360, 300)); // карточка закрывает подсказку и змейку под ней
-  screen.add(addText(scene, CENTER_X, 400, 'Пауза', 56, TEXT_COLOR, true).setOrigin(0.5));
-  const subtitle = isTouch ? 'Игровое время стоит' : 'Esc — продолжить';
-  screen.add(addText(scene, CENTER_X, 452, subtitle, 20, MUTED_COLOR).setOrigin(0.5));
-  screen.add(addButton(scene, CENTER_X, 548, 'Продолжить', onResume));
+  screen.add(addCard(scene, 500, 360, 380)); // карточка закрывает подсказку и змейку под ней
+  screen.add(addText(scene, CENTER_X, 380, 'Пауза', 56, TEXT_COLOR, true).setOrigin(0.5));
+  const subtitle = isTouch ? 'Игровое время стоит' : 'Esc — продолжить · M — звук';
+  screen.add(addText(scene, CENTER_X, 432, subtitle, 20, MUTED_COLOR).setOrigin(0.5));
+  screen.add(addButton(scene, CENTER_X, 520, 'Продолжить', onResume));
+  // На телефоне нет клавиши M — звук выключается здесь
+  const soundButton = addButton(scene, CENTER_X, 612, soundLabel(), () => {
+    toggleMuted();
+    soundButton.find((part): part is Text => part instanceof Phaser.GameObjects.Text)?.setText(soundLabel());
+  });
+  screen.add(soundButton);
   scene.tweens.add({ targets: screen, alpha: 1, duration: 150 });
 
   return () => screen.destroy();
+}
+
+function soundLabel(): string {
+  return isMuted() ? 'Звук: выкл' : 'Звук: вкл';
 }
 
 export interface GameOverInfo {

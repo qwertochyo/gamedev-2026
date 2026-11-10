@@ -1,10 +1,11 @@
-// Обратная связь: вспышки, всплывающие очки, баннеры, тряска и вибрация.
+// Обратная связь: вспышки, всплывающие очки, баннеры, тряска, вибрация и звук.
 // Только показывает — правила игры отсюда не меняются.
 
 import Phaser from 'phaser';
 import { fallMsForLevel, type Cell } from './logic';
 import { BLUEPRINT_Y, CELL, FIELD_H, FIELD_W, FIELD_X, FIELD_Y, GAME_WIDTH, drawCellsFlash } from './draw';
 import { ACCENT_COLOR, DEPTH, floatText, showBanner } from './ui';
+import { playGameOver, playLand, playLevelUp, playLines, playOrderDone } from './sound';
 
 const BIG_CLEAR_LINES = 3; // со стольких линий сразу трясём экран
 const VIBRATE_LINE_MS = 30;
@@ -18,21 +19,24 @@ const PHASE_BANNER_Y = FIELD_Y + FIELD_H * 0.6;
 
 type Scene = Phaser.Scene;
 
-/** Заказ собран: «+20» взлетает от чертежа заказа. */
+/** Заказ собран — ключевое действие игры: «+20» от чертежа, три ноты, вибрация (превращение рисует draw.ts). */
 export function celebrateOrder(scene: Scene, points: number): void {
+  playOrderDone();
   floatText(scene, GAME_WIDTH / 2, BLUEPRINT_Y, `+${points}`, 44, ORDER_DONE_COLOR);
   vibrate(VIBRATE_LINE_MS);
 }
 
-/** Белая вспышка на застывших клетках. */
+/** Фигура застыла: белая вспышка на её клетках и глухой стук. */
 export function flashCells(scene: Scene, cells: Cell[]): void {
+  playLand();
   const flash = scene.add.graphics().setDepth(DEPTH.fx).setAlpha(0.7);
   drawCellsFlash(flash, cells);
   scene.tweens.add({ targets: flash, alpha: 0, duration: 250, onComplete: () => flash.destroy() });
 }
 
-/** Очистка линий: вспышка строк, «+200», тряска за 3+ линии, вибрация. */
+/** Очистка линий: вспышка строк, «+200», тряска за 3+ линии, вибрация, звук. */
 export function celebrateLines(scene: Scene, rows: number[], points: number): void {
+  playLines(rows.length);
   flashRows(scene, rows);
   showLinePoints(scene, rows, points);
   const isBigClear = rows.length >= BIG_CLEAR_LINES;
@@ -67,6 +71,7 @@ function showLinePoints(scene: Scene, rows: number[], points: number): void {
 
 /** Баннер «Уровень 2 — Фигуры падают быстрее». */
 export function showLevelUpBanner(scene: Scene, oldLevel: number, newLevel: number): void {
+  playLevelUp();
   const faster = fallMsForLevel(newLevel) < fallMsForLevel(oldLevel);
   showBanner(scene, `Уровень ${newLevel}`, faster ? 'Фигуры падают быстрее' : 'Так держать!', LEVEL_BANNER_Y);
 }
@@ -76,8 +81,9 @@ export function showPhaseBanner(scene: Scene, phase: number): void {
   showBanner(scene, `Фаза ${phase}`, 'Меньше времени на заказ\nФигуры застывают быстрее', PHASE_BANNER_Y);
 }
 
-/** Конец игры: экран трясётся, телефон вибрирует. */
+/** Конец игры: экран трясётся, телефон вибрирует, звук идёт вниз. */
 export function gameOverFeedback(scene: Scene): void {
+  playGameOver();
   scene.cameras.main.shake(300, 0.008);
   vibrate(VIBRATE_GAME_OVER_MS);
 }

@@ -1,15 +1,17 @@
 import Phaser from 'phaser';
 import type { Dir } from './logic';
-import { GAME_HEIGHT, GAME_WIDTH, RENDER_SCALE, drawBackground, drawRound } from './draw';
+import { FIELD_Y, GAME_HEIGHT, GAME_WIDTH, RENDER_SCALE, drawBackground, drawRound } from './draw';
 import { celebrateLines, celebrateOrder, flashCells, gameOverFeedback, showLevelUpBanner, showPhaseBanner } from './effects';
 import { Hud } from './hud';
 import { IS_TOUCH, setupInput, type KeyIntent } from './input';
 import { Round, type GameOverReason, type RoundEvents } from './round';
 import { loadBestScore, saveBestScore } from './storage';
-import { createHint, showGameOverCard, showPauseScreen, showStartScreen } from './ui';
+import { TEXT_COLOR, createHint, floatText, showGameOverCard, showPauseScreen, showStartScreen } from './ui';
+import { toggleMuted, unlockSound } from './sound';
 
 const MAX_FRAME_DELTA_MS = 100; // защита от рывка после переключения вкладки
 const GAME_OVER_DELAY_MS = 800; // пауза перед карточкой конца: видно, что произошло
+const SOUND_TOAST_Y = FIELD_Y + 40; // «Звук выключен» — у верха стакана
 
 interface SceneData {
   skipIntro?: boolean; // при «Ещё раз» стартовый экран не показываем
@@ -106,6 +108,12 @@ export class GameScene extends Phaser.Scene {
     this.closeStartScreen = null;
   }
 
+  /** M: звук вкл/выкл, с короткой надписью у верха стакана. */
+  private toggleSound(): void {
+    const muted = toggleMuted();
+    floatText(this, GAME_WIDTH / 2, SOUND_TOAST_Y, muted ? 'Звук выключен' : 'Звук включён', 26, TEXT_COLOR);
+  }
+
   /** Esc: поставить на паузу или продолжить. На стартовом экране и после конца игры не действует. */
   private togglePause(): void {
     if (this.isPaused) this.resume();
@@ -151,10 +159,15 @@ export class GameScene extends Phaser.Scene {
 
   // ---------- ввод ----------
 
-  /** Клавиша: Esc — пауза; на стартовом экране — любая клавиша; в игре стрелки рисуют и двигают, пробел роняет; после конца — R, Enter, пробел. */
+  /** Клавиша: Esc — пауза, M — звук; на стартовом экране — любая клавиша; в игре стрелки рисуют и двигают, пробел роняет; после конца — R, Enter, пробел. */
   private handleKey(intent: KeyIntent): void {
+    unlockSound(); // браузер включает звук только после действия игрока
     if (intent.type === 'pause') {
       this.togglePause();
+      return;
+    }
+    if (intent.type === 'mute') {
+      this.toggleSound();
       return;
     }
     if (!this.isStarted) {
@@ -171,6 +184,7 @@ export class GameScene extends Phaser.Scene {
 
   /** Касание без свайпа: на стартовом экране — начать игру, в игре — уронить фигуру. */
   private handleTap(): void {
+    unlockSound();
     if (!this.isStarted) this.startGame();
     else this.handleDrop();
   }
