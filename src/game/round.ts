@@ -1,18 +1,18 @@
-// Одна партия: стакан, мастерская, змейка, заказы фигур, труба, очки, уровень, фаза и правила хода.
+// Одна партия: стакан, мастерская, змейка, заказы фигур, очки, уровень, фаза и правила хода.
 // Без Phaser — только данные и правила. Наружу партия сообщает событиями (RoundEvents).
 //
-// Каждая фигура проходит два этапа:
+// Каждая фигура проходит три этапа:
 // 1) 'draw'  — мастерская 5×5: змейка ползает без гравитации и собирает заказ, пока идёт таймер;
-// 2) 'place' — собранная фигура появляется в стакане под трубой и падает; её двигают, крутят и роняют.
+// 2) 'morph' — змейка превращается в фигуру и опускается в стакан (MORPH_MS, игра ждёт);
+// 3) 'place' — фигура падает в стакане сверху по центру; её двигают, крутят и роняют.
 
 import {
-  COLS,
   DROP_STEP_MS,
+  MORPH_MS,
   ORDER_BONUS,
   ROTATE_KICKS,
   ROTATE_PIVOT_INDEX,
   SNAKE_LENGTH,
-  SPAWN_COL,
   WORKSHOP_ENTRY_COL,
   clearFullRows,
   createGrid,
@@ -30,6 +30,7 @@ import {
   scoreForLines,
   shapeOf,
   shuffledBag,
+  spawnLeft,
   turnClockwise,
   type Cell,
   type Dir,
@@ -38,8 +39,8 @@ import {
   type ShapeId,
 } from './logic';
 
-/** Этап текущей фигуры: собрать в мастерской или поставить в стакан. */
-export type Stage = 'draw' | 'place';
+/** Этап текущей фигуры: собрать в мастерской, превратиться в фигуру, поставить в стакан. */
+export type Stage = 'draw' | 'morph' | 'place';
 
 /** Почему партия закончилась — для карточки конца игры. */
 export interface GameOverReason {
@@ -65,7 +66,7 @@ export interface RoundEvents {
 export class Round {
   grid: Grid = createGrid();
   stage: Stage = 'draw';
-  // Клетки змейки: на этапе 'draw' — в координатах мастерской, на этапе 'place' — в координатах стакана
+  // Клетки змейки: на этапах 'draw' и 'morph' — в координатах мастерской, на этапе 'place' — в координатах стакана
   snake: Cell[] = [];
   prevSnake: Cell[] = []; // где змейка была до последнего движения — для плавной отрисовки
   moveAge = 0; // сколько мс прошло с последнего движения змейки
@@ -78,15 +79,13 @@ export class Round {
   phase = 1;
   drawMs = 0; // сколько всего времени на текущий заказ
   drawMsLeft = 0; // сколько из него осталось
+  morphMs = 0; // сколько мс идёт превращение
+  spawnCells: Cell[] = []; // где собранная фигура появится в стакане
   fallMs = fallMsForLevel(1);
   fallTimer = 0;
   isResting = false; // фигура легла на опору и ждёт: её ещё можно сдвинуть или повернуть
   restMs = 0; // сколько фигура уже лежит на опоре
   isDropping = false; // брошена пробелом: падает до опоры и сразу застывает
-  pipeCol = SPAWN_COL;
-  prevPipeCol = SPAWN_COL;
-  pipeDir = 1; // 1 — труба едет вправо, -1 — влево
-  pipeTimer = 0;
   isOver = false;
 
   private readonly events: RoundEvents;
@@ -110,11 +109,9 @@ export class Round {
   /** Игровое время: сцена зовёт каждый кадр, пока идёт игра. На паузе не зовёт — и всё стоит. */
   tick(dt: number): void {
     this.moveAge += dt;
-    if (this.stage === 'draw') {
-      this.tickDrawing(dt); // пока собирают заказ, стакан и труба стоят
-      return;
-    }
-    this.updatePipe(dt);
+    // пока собирают заказ и пока змейка превращается, стакан стоит
+    if (this.stage === 'draw') return this.tickDrawing(dt);
+    if (this.stage === 'morph') return this.tickMorph(dt);
 
     this.fallTimer += dt;
     while (this.fallTimer >= this.currentFallMs() && !this.isOver) {
@@ -138,7 +135,7 @@ export class Round {
     return this.isDropping ? DROP_STEP_MS : this.fallMs;
   }
 
-  /** Параметры текущей фазы: скорость трубы, пауза перед застыванием, время на заказ. */
+  /** Параметры текущей фазы: пауза перед застыванием и время на заказ. */
   params(): PhaseParams {
     return phaseParams(this.phase);
   }
@@ -148,7 +145,7 @@ export class Round {
    * В стакане — ← → ↓ двигают фигуру целиком, ↑ поворачивает.
    */
   steer(dir: Dir): void {
-    if (this.isOver || this.isDropping) return;
+    if (this.isOver || this.isDropping || this.stage === 'morph') return;
     if (this.stage === 'draw') this.moveHead(dir);
     else if (dir === 'up') this.rotatePiece();
     else this.shiftPiece(dir);
@@ -161,6 +158,15 @@ export class Round {
     this.fallTimer = this.currentFallMs(); // первый шаг броска — в ближайшем кадре
   }
 
+  /** Куда упадёт фигура, если уронить её сейчас, — для контура в стакане. */
+  landingCells(): Cell[] {
+    let cells = this.snake;
+    while (cells.every((cell) => isFree(this.grid, { col: cell.col, row: cell.row + 1 }))) {
+      cells = cells.map((cell) => ({ col: cell.col, row: cell.row + 1 }));
+    }
+    return cells;
+  }
+
   // ---------- этап 1: мастерская ----------
 
   /** Новая змейка выползает в мастерскую сверху, запускается таймер заказа. */
@@ -170,7 +176,6 @@ export class Round {
     this.isResting = false;
     this.restMs = 0;
     this.isDropping = false;
-    this.prevPipeCol = this.pipeCol; // труба стоит ровно над столбцом, где появится фигура
     this.drawMs = drawMsForLevel(this.level) * this.params().drawTimeFactor;
     this.drawMsLeft = this.drawMs;
     // Голова в верхней клетке мастерской, тело выше — ещё во входе
@@ -207,33 +212,43 @@ export class Round {
     return this.snake.slice(0, -1).some((cell) => cell.col === target.col && cell.row === target.row);
   }
 
-  /** Заказ собран: +очки, фигура в том же виде появляется в стакане под трубой. */
+  /** Заказ собран: +очки, змейка начинает превращаться в фигуру. Места в стакане нет — конец. */
   private finishDrawing(): void {
     this.events.onOrderDone(ORDER_BONUS);
     this.addProgress(0, ORDER_BONUS);
 
-    const piece = this.pieceUnderPipe(this.snake);
-    if (!this.canPlace(piece)) {
+    this.spawnCells = this.pieceAtTop(this.snake);
+    if (!this.canPlace(this.spawnCells)) {
       this.gameOver({ title: 'Стакан полон!', text: 'Фигуре негде появиться' });
       return;
     }
-    this.stage = 'place';
-    this.snake = piece;
-    this.prevSnake = piece.map((cell) => ({ ...cell }));
-    this.fallMs = fallMsForLevel(this.level);
-    this.fallTimer = 0;
-    this.pipeTimer = 0;
-    this.prevPipeCol = this.pipeCol; // труба встаёт ровно над своим столбцом
+    this.stage = 'morph';
+    this.morphMs = 0;
   }
 
-  /** Собранная фигура в стакане: верхним краем у трубы, по центру под ней, не за стенками. */
-  private pieceUnderPipe(cells: Cell[]): Cell[] {
+  /** Собранная фигура в стакане: в том же виде, верхним краем у верха стакана, по центру. */
+  private pieceAtTop(cells: Cell[]): Cell[] {
     const minCol = Math.min(...cells.map((cell) => cell.col));
     const maxCol = Math.max(...cells.map((cell) => cell.col));
     const minRow = Math.min(...cells.map((cell) => cell.row));
-    const width = maxCol - minCol + 1;
-    const left = Math.min(Math.max(this.pipeCol - Math.floor((width - 1) / 2), 0), COLS - width);
+    const left = spawnLeft(maxCol - minCol + 1);
     return cells.map((cell) => ({ col: cell.col - minCol + left, row: cell.row - minRow }));
+  }
+
+  // ---------- переход: превращение ----------
+
+  private tickMorph(dt: number): void {
+    this.morphMs += dt;
+    if (this.morphMs >= MORPH_MS) this.startPlacing();
+  }
+
+  /** Фигура опустилась в стакан — дальше она падает, её двигают и крутят. */
+  private startPlacing(): void {
+    this.stage = 'place';
+    this.snake = this.spawnCells.map((cell) => ({ ...cell }));
+    this.prevSnake = this.spawnCells.map((cell) => ({ ...cell }));
+    this.fallMs = fallMsForLevel(this.level);
+    this.fallTimer = 0;
   }
 
   // ---------- этап 2: стакан ----------
@@ -340,19 +355,6 @@ export class Round {
   /** В очереди всегда есть текущий и следующий заказ. */
   private fillOrders(): void {
     while (this.orders.length < 2) this.orders.push(...shuffledBag());
-  }
-
-  /** Труба ездит над стаканом туда-обратно, пока фигура в стакане. Под ней появится следующая фигура. */
-  private updatePipe(dt: number): void {
-    this.pipeTimer += dt;
-    const pipeStepMs = this.params().pipeStepMs;
-    if (this.pipeTimer < pipeStepMs) return;
-    this.pipeTimer -= pipeStepMs;
-
-    const next = this.pipeCol + this.pipeDir;
-    if (next < 0 || next >= COLS) this.pipeDir = -this.pipeDir; // у стенки разворачивается
-    this.prevPipeCol = this.pipeCol;
-    this.pipeCol += this.pipeDir;
   }
 
   private gameOver(reason: GameOverReason): void {

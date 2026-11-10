@@ -13,7 +13,6 @@ export type Grid = number[][];
 // поле
 export const COLS = 10;
 export const ROWS = 18;
-export const SPAWN_COL = 4; // столбец трубы в начале партии
 export const EMPTY = -1;
 
 // змейка и сложность
@@ -32,19 +31,20 @@ export const WORKSHOP_ENTRY_COL = 2; // змейка выползает в ма�
 export const DRAW_MS_START = 8000; // время на заказ на 1-м уровне
 export const DRAW_MS_PER_LEVEL = 500; // на столько меньше с каждым уровнем
 export const DRAW_MS_MIN = 4000;
+// Переход между этапами: змейка превращается в фигуру и опускается в стакан. Игра в это время ждёт
+export const MORPH_MS = 700;
 
 // Фазы. Правила в обеих одинаковые — с ростом очков меняются только параметры.
-// Уровни (по линиям) меняют скорость падения и время на заказ, фазы (по очкам) — трубу, застывание и время на заказ.
+// Уровни (по линиям) меняют скорость падения и время на заказ, фазы (по очкам) — застывание и время на заказ.
 export const PHASE_2_AT_SCORE = 1000; // фаза 2 с 1000 очков (примерно 5–10 линий)
 
 export interface PhaseParams {
-  pipeStepMs: number; // за сколько труба сдвигается на столбец
   lockDelayMs: number; // сколько фигура стоит на опоре, прежде чем застыть
   drawTimeFactor: number; // во сколько раз меньше времени на заказ, чем по уровню
 }
 
-const PHASE_1: PhaseParams = { pipeStepMs: 450, lockDelayMs: 600, drawTimeFactor: 1 };
-const PHASE_2: PhaseParams = { pipeStepMs: 280, lockDelayMs: 350, drawTimeFactor: 0.75 };
+const PHASE_1: PhaseParams = { lockDelayMs: 600, drawTimeFactor: 1 };
+const PHASE_2: PhaseParams = { lockDelayMs: 350, drawTimeFactor: 0.75 };
 
 export function createGrid(): Grid {
   return Array.from({ length: ROWS }, () => createEmptyRow());
@@ -61,11 +61,11 @@ export function move(cell: Cell, dir: Dir): Cell {
   return { col: cell.col, row: cell.row + 1 };
 }
 
-/** Стенки и дно заняты, клетки над полем (труба) свободны. */
+/** Стенки и дно заняты, клетки над полем свободны. */
 export function isFree(grid: Grid, cell: Cell): boolean {
   if (cell.col < 0 || cell.col >= COLS) return false; // стенка
   if (cell.row >= ROWS) return false; // дно
-  if (cell.row < 0) return true; // труба над полем
+  if (cell.row < 0) return true; // над полем
   return grid[cell.row][cell.col] === EMPTY;
 }
 
@@ -123,6 +123,11 @@ export function fallMsForLevel(level: number): number {
 /** Сколько мс на заказ на этом уровне (до поправки фазы). */
 export function drawMsForLevel(level: number): number {
   return Math.max(DRAW_MS_MIN, DRAW_MS_START - (level - 1) * DRAW_MS_PER_LEVEL);
+}
+
+/** Левый столбец, с которого фигура шириной width появляется в стакане: вверху по центру. */
+export function spawnLeft(width: number): number {
+  return Math.floor((COLS - width) / 2);
 }
 
 /** Клетка внутри мастерской 5×5. */

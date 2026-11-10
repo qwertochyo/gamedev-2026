@@ -1,9 +1,20 @@
 // Верхняя панель: очки, заказанная фигура, рекорд, следующий заказ, линии, уровень и кнопка паузы;
-// надписи мастерской (заказ и секунды); строка фазы под стаканом.
+// надписи карточки мастерской (заголовок, секунды, подсказка); строка фазы под стаканом.
 
 import Phaser from 'phaser';
 import { PHASE_2_AT_SCORE, SHAPES } from './logic';
-import { FIELD_W, FIELD_X, GAME_WIDTH, ORDER_COLOR, ORDER_INFO_X, TIMER_Y, WORKSHOP_Y, drawShape } from './draw';
+import {
+  CARD_HINT_Y,
+  CARD_LEFT,
+  CARD_RIGHT,
+  CARD_TITLE_Y,
+  FIELD_W,
+  FIELD_X,
+  GAME_WIDTH,
+  ORDER_COLOR,
+  drawShape,
+  workshopAlpha,
+} from './draw';
 import { ACCENT_COLOR, MUTED_COLOR, TEXT_COLOR, addText } from './ui';
 import { bump } from './effects';
 import type { Round } from './round';
@@ -23,7 +34,6 @@ const PAUSE_BORDER_COLOR = 0x334155;
 const PAUSE_ICON_COLOR = 0xcbd5e1;
 const HUD_RIGHT = FIELD_X + FIELD_W - PAUSE_BUTTON_SIZE - 14; // рекорд стоит левее кнопки паузы
 const STATUS_Y = 948; // строка «Фаза 1 · фаза 2 с 1000 очков» под стаканом
-const SECONDS_GAP = 28; // секунды — под полоской времени
 const LOW_TIME_MS = 2000; // меньше стольких мс — секунды красные
 
 type Text = Phaser.GameObjects.Text;
@@ -37,12 +47,12 @@ export class Hud {
   private readonly statusText: Text;
   private readonly orderPreview: Phaser.GameObjects.Graphics;
   private readonly nextPreview: Phaser.GameObjects.Graphics;
-  private readonly workshopLabel: Text; // «СОБЕРИ ЗАКАЗ» над фигурой в мастерской
+  private readonly workshopTexts: Text[]; // заголовок, секунды и подсказка карточки мастерской — тают вместе с ней
   private readonly secondsText: Text;
   private shownScore = 0;
 
-  /** onPause — нажали кнопку паузы. */
-  constructor(scene: Phaser.Scene, onPause: () => void) {
+  /** isTouch — телефон (подсказки про свайпы); onPause — нажали кнопку паузы. */
+  constructor(scene: Phaser.Scene, isTouch: boolean, onPause: () => void) {
     this.scene = scene;
     const center = GAME_WIDTH / 2;
     const right = FIELD_X + FIELD_W;
@@ -61,8 +71,11 @@ export class Hud {
 
     this.orderPreview = scene.add.graphics().setPosition(center, ORDER_Y);
     this.nextPreview = scene.add.graphics();
-    this.workshopLabel = label(ORDER_INFO_X, WORKSHOP_Y, 'СОБЕРИ ЗАКАЗ').setOrigin(0.5, 0).setFontSize(15);
-    this.secondsText = addText(scene, ORDER_INFO_X, TIMER_Y + SECONDS_GAP, '', 20, TEXT_COLOR, true).setOrigin(0.5);
+    const title = label(CARD_LEFT, CARD_TITLE_Y, 'СОБЕРИ ЗАКАЗ').setOrigin(0, 0.5).setFontSize(15);
+    this.secondsText = addText(scene, CARD_RIGHT, CARD_TITLE_Y, '', 22, TEXT_COLOR, true).setOrigin(1, 0.5);
+    const hintText = isTouch ? 'Свайпы ← ↑ → ↓ — рисуй змейкой' : '← ↑ → ↓ — рисуй змейкой';
+    const hint = addText(scene, center, CARD_HINT_Y, hintText, 17, MUTED_COLOR).setOrigin(0.5);
+    this.workshopTexts = [title, this.secondsText, hint];
     createPauseButton(scene, onPause);
   }
 
@@ -79,12 +92,11 @@ export class Hud {
     this.shownScore = round.score;
   }
 
-  /** Каждый кадр: надписи мастерской видны, пока собирают заказ; секунды тикают. */
+  /** Каждый кадр: надписи карточки видны вместе с ней; секунды тикают. */
   updateWorkshop(round: Round): void {
-    const isDrawing = round.stage === 'draw';
-    this.workshopLabel.setVisible(isDrawing);
-    this.secondsText.setVisible(isDrawing);
-    if (!isDrawing) return;
+    const alpha = workshopAlpha(round);
+    for (const text of this.workshopTexts) text.setVisible(alpha > 0).setAlpha(alpha);
+    if (alpha === 0) return;
     this.secondsText.setText(`${Math.ceil(round.drawMsLeft / 1000)} с`);
     this.secondsText.setColor(round.drawMsLeft < LOW_TIME_MS ? ACCENT_COLOR : TEXT_COLOR);
   }
@@ -100,10 +112,10 @@ export class Hud {
     this.statusText.setText(text).setColor(phase > 1 ? ACCENT_COLOR : MUTED_COLOR);
   }
 
-  /** Заказ — в центре панели, следующий заказ — мелко справа внизу. */
+  /** Заказ — жёлтым чертежом в центре панели, следующий заказ — мелко справа внизу. */
   private drawOrders(round: Round): void {
     this.orderPreview.clear();
-    drawShape(this.orderPreview, SHAPES[round.order()], 0, 0, ORDER_CELL, ORDER_COLOR);
+    drawShape(this.orderPreview, SHAPES[round.order()], 0, 0, ORDER_CELL, ORDER_COLOR, 'blueprint');
     const right = FIELD_X + FIELD_W;
     this.nextPreview.clear();
     drawShape(this.nextPreview, SHAPES[round.nextOrder()], right - 2 * NEXT_CELL, HUD_ROW2_Y, NEXT_CELL, NEXT_COLOR);

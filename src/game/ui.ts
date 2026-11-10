@@ -109,29 +109,18 @@ export function showBanner(scene: Scene, title: string, subtitle: string, y = FI
 
 const HINT_ALPHA = 0.55;
 
-/** Подсказка в середине стакана. Видна, пока не застыла первая фигура. */
+/** Подсказка про стакан в его середине. Сцена показывает её, пока ставят первую фигуру. */
 export function createHint(scene: Scene, isTouch: boolean): Text {
-  const draw = isTouch ? 'Свайпы — рисовать' : '← ↑ → ↓ — рисовать';
-  const steer = isTouch ? 'В стакане: свайпы двигают, ↑ крутит' : 'В стакане: ← → двигать, ↑ крутить';
-  const drop = isTouch ? 'Тап — уронить' : 'Пробел — уронить';
-  const text = `Собери змейкой фигуру из заказа,\nпока не кончилось время\n\n${draw}\n${steer}\n${drop}`;
+  const text = isTouch
+    ? 'Свайпы ← → ↓ — двигать\nСвайп ↑ — повернуть\nТап — уронить'
+    : '← → ↓ — двигать\n↑ — повернуть\nПробел — уронить';
   return addText(scene, FIELD_X + FIELD_W / 2, FIELD_Y + FIELD_H / 2, text, 24)
     .setAlign('center')
     .setLineSpacing(6)
     .setOrigin(0.5)
     .setAlpha(HINT_ALPHA)
-    .setDepth(DEPTH.hint);
-}
-
-/** Плавно показать подсказку — когда убрали стартовый экран. */
-export function showHint(scene: Scene, hint: Text): void {
-  scene.tweens.add({ targets: hint, alpha: HINT_ALPHA, duration: 300 });
-}
-
-/** Плавно убрать подсказку — после первого застывания. */
-export function hideHint(scene: Scene, hint: Text): void {
-  if (!hint.visible || scene.tweens.isTweening(hint)) return;
-  scene.tweens.add({ targets: hint, alpha: 0, duration: 300, onComplete: () => hint.setVisible(false) });
+    .setDepth(DEPTH.hint)
+    .setVisible(false);
 }
 
 function addOverlay(scene: Scene, alpha: number): Phaser.GameObjects.Rectangle {
@@ -161,7 +150,7 @@ export function showStartScreen(scene: Scene, bestScore: number, isTouch: boolea
   const shift = (left.width - right.width) / 2;
   left.x += shift;
   right.x += shift;
-  const tagline = addText(scene, CENTER_X, 262, 'Змейка собирает фигуры для тетриса', 22, MUTED_COLOR).setOrigin(0.5);
+  const tagline = addText(scene, CENTER_X, 262, 'Змейка превращается в фигуры тетриса', 22, MUTED_COLOR).setOrigin(0.5);
   screen.add([left, right, tagline]);
 
   const rules = [
@@ -171,7 +160,7 @@ export function showStartScreen(scene: Scene, bestScore: number, isTouch: boolea
     isTouch ? 'В стакане: свайпы двигают, ↑ крутит' : 'В стакане: ← → двигай, ↑ крути',
     isTouch ? 'Тап — уронить фигуру' : 'Пробел — уронить фигуру',
     'Заполни ряд — он исчезнет',
-    'Фигура появится под трубой',
+    'Жёлтый контур — куда она упадёт',
   ];
   const rulesTop = 312;
   const rowHeight = 46;

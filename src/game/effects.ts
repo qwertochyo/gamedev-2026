@@ -3,7 +3,7 @@
 
 import Phaser from 'phaser';
 import { fallMsForLevel, type Cell } from './logic';
-import { CELL, FIELD_H, FIELD_W, FIELD_X, FIELD_Y, WORKSHOP_CENTER_X, WORKSHOP_CENTER_Y, drawCellsFlash } from './draw';
+import { BLUEPRINT_Y, CELL, FIELD_H, FIELD_W, FIELD_X, FIELD_Y, GAME_WIDTH, drawCellsFlash } from './draw';
 import { ACCENT_COLOR, DEPTH, floatText, showBanner } from './ui';
 
 const BIG_CLEAR_LINES = 3; // со стольких линий сразу трясём экран
@@ -12,15 +12,15 @@ const VIBRATE_BIG_MS = 80;
 const VIBRATE_GAME_OVER_MS = 150;
 const POPUP_BOTTOM_MARGIN = 60; // «+200» не вылезает за дно стакана
 const ORDER_DONE_COLOR = '#4ade80';
-// Баннеры — ниже мастерской (она вверху стакана) и друг под другом, чтобы не наложились
-const LEVEL_BANNER_Y = FIELD_Y + FIELD_H * 0.45;
+// Баннеры — в нижней части стакана, где их не закрывает карточка мастерской, и не друг на друге
+const LEVEL_BANNER_Y = FIELD_Y + FIELD_H * 0.8;
 const PHASE_BANNER_Y = FIELD_Y + FIELD_H * 0.6;
 
 type Scene = Phaser.Scene;
 
-/** Заказ собран: «+20» над мастерской. */
+/** Заказ собран: «+20» взлетает от чертежа заказа. */
 export function celebrateOrder(scene: Scene, points: number): void {
-  floatText(scene, WORKSHOP_CENTER_X, WORKSHOP_CENTER_Y, `+${points}`, 44, ORDER_DONE_COLOR);
+  floatText(scene, GAME_WIDTH / 2, BLUEPRINT_Y, `+${points}`, 44, ORDER_DONE_COLOR);
   vibrate(VIBRATE_LINE_MS);
 }
 
@@ -73,7 +73,7 @@ export function showLevelUpBanner(scene: Scene, oldLevel: number, newLevel: numb
 
 /** Баннер «Фаза 2» — ниже баннера уровня, чтобы они не наложились. */
 export function showPhaseBanner(scene: Scene, phase: number): void {
-  showBanner(scene, `Фаза ${phase}`, 'Меньше времени на заказ\nТруба ездит быстрее\nФигуры застывают быстрее', PHASE_BANNER_Y);
+  showBanner(scene, `Фаза ${phase}`, 'Меньше времени на заказ\nФигуры застывают быстрее', PHASE_BANNER_Y);
 }
 
 /** Конец игры: экран трясётся, телефон вибрирует. */
