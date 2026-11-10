@@ -2,8 +2,8 @@
 
 Браузерная игра: змейка выползает из трубы и падает в стакан тетриса. Фигуру тебе не дают — ты рисуешь её сам: форма застывшей змейки и есть след, который оставила голова.
 
-- **Играть:** https://qwertochyo.github.io/gamed-2026/ — на телефоне и на компьютере
-- **Репозиторий:** https://github.com/qwertochyo/gamed-2026
+- **Играть:** https://qwertochyo.github.io/gamedev-2026/ — на телефоне и на компьютере
+- **Репозиторий:** https://github.com/qwertochyo/gamedev-2026
 
 Стек: **TypeScript + Phaser + Vite + GitHub Pages**. План MVP — [`MVP-2.md`](./MVP-2.md), как устроен код — [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
