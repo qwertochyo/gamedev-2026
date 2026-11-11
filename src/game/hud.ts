@@ -2,7 +2,7 @@
 // надписи карточки мастерской (заголовок, секунды, подсказка); строка фазы под стаканом.
 
 import Phaser from 'phaser';
-import { PHASE_2_AT_SCORE, SHAPES } from './logic';
+import { PHASE_2_AT_SCORE, PHASE_3_AT_SCORE, SHAPES } from './logic';
 import {
   CARD_HINT_Y,
   CARD_LEFT,
@@ -33,8 +33,8 @@ const PAUSE_HIT_H = 72;
 const PAUSE_BORDER_COLOR = 0x334155;
 const PAUSE_ICON_COLOR = 0xcbd5e1;
 const HUD_RIGHT = FIELD_X + FIELD_W - PAUSE_BUTTON_SIZE - 14; // рекорд стоит левее кнопки паузы
-const STATUS_Y = 948; // строка «Фаза 1 · фаза 2 с 1000 очков» под стаканом
-const LOW_TIME_MS = 2000; // меньше стольких мс — секунды красные
+const STATUS_Y = 948; // строка «Фаза 1 · фаза 2 с 250 очков» под стаканом
+const LOW_TIME_MS = 2000; // меньше стольких мс — секунды жёлтые
 
 type Text = Phaser.GameObjects.Text;
 
@@ -49,6 +49,8 @@ export class Hud {
   private readonly nextPreview: Phaser.GameObjects.Graphics;
   private readonly workshopTexts: Text[]; // заголовок, секунды и подсказка карточки мастерской — тают вместе с ней
   private readonly secondsText: Text;
+  private readonly cardHint: Text;
+  private readonly drawHint: string; // подсказка без камней
   private shownScore = 0;
 
   /** isTouch — телефон (подсказки про свайпы); onPause — нажали кнопку паузы. */
@@ -73,9 +75,9 @@ export class Hud {
     this.nextPreview = scene.add.graphics();
     const title = label(CARD_LEFT, CARD_TITLE_Y, 'СОБЕРИ ЗАКАЗ').setOrigin(0, 0.5).setFontSize(15);
     this.secondsText = addText(scene, CARD_RIGHT, CARD_TITLE_Y, '', 22, TEXT_COLOR, true).setOrigin(1, 0.5);
-    const hintText = isTouch ? 'Свайпы ← ↑ → ↓ — рисуй змейкой' : '← ↑ → ↓ — рисуй змейкой';
-    const hint = addText(scene, center, CARD_HINT_Y, hintText, 17, MUTED_COLOR).setOrigin(0.5);
-    this.workshopTexts = [title, this.secondsText, hint];
+    this.drawHint = isTouch ? 'Свайпы ← ↑ → ↓ — рисуй змейкой' : '← ↑ → ↓ — рисуй змейкой';
+    this.cardHint = addText(scene, center, CARD_HINT_Y, this.drawHint, 17, MUTED_COLOR).setOrigin(0.5);
+    this.workshopTexts = [title, this.secondsText, this.cardHint];
     createPauseButton(scene, onPause);
   }
 
@@ -98,6 +100,7 @@ export class Hud {
     for (const text of this.workshopTexts) text.setVisible(alpha > 0).setAlpha(alpha);
     if (alpha === 0) return;
     this.secondsText.setText(`${Math.ceil(round.drawMsLeft / 1000)} с`);
+    this.cardHint.setText(round.rocks.length > 0 ? 'Через камни не проползти — обползай' : this.drawHint);
     this.secondsText.setColor(round.drawMsLeft < LOW_TIME_MS ? ACCENT_COLOR : TEXT_COLOR);
   }
 
@@ -106,9 +109,14 @@ export class Hud {
     bump(this.scene, this.levelText);
   }
 
-  /** «Фаза 1 · фаза 2 с 1000 очков» под стаканом; в фазе 2 — жёлтая «Фаза 2». */
+  /** «Фаза 1 · фаза 2 с 250 очков» под стаканом; с фазы 2 — жёлтая, с подсказкой, когда следующая. */
   private updateStatus(phase: number): void {
-    const text = phase === 1 ? `Фаза 1 · фаза 2 с ${PHASE_2_AT_SCORE} очков` : `Фаза ${phase}`;
+    const text =
+      phase === 1
+        ? `Фаза 1 · фаза 2 с ${PHASE_2_AT_SCORE} очков`
+        : phase === 2
+          ? `Фаза 2 · фаза 3 с ${PHASE_3_AT_SCORE} очков`
+          : 'Фаза 3 · камни в мастерской';
     this.statusText.setText(text).setColor(phase > 1 ? ACCENT_COLOR : MUTED_COLOR);
   }
 

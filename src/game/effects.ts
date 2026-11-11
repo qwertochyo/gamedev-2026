@@ -76,9 +76,15 @@ export function showLevelUpBanner(scene: Scene, oldLevel: number, newLevel: numb
   showBanner(scene, `Уровень ${newLevel}`, faster ? 'Фигуры падают быстрее' : 'Так держать!', LEVEL_BANNER_Y);
 }
 
-/** Баннер «Фаза 2» — ниже баннера уровня, чтобы они не наложились. */
+// Что нового в фазе — строка под заголовком баннера
+const PHASE_NEWS: Record<number, string> = {
+  2: 'Меньше времени на заказ\nФигуры застывают быстрее',
+  3: 'В мастерской камни —\nобползай их змейкой',
+};
+
+/** Баннер «Фаза 2», «Фаза 3» — выше баннера уровня, чтобы они не наложились. */
 export function showPhaseBanner(scene: Scene, phase: number): void {
-  showBanner(scene, `Фаза ${phase}`, 'Меньше времени на заказ\nФигуры застывают быстрее', PHASE_BANNER_Y);
+  showBanner(scene, `Фаза ${phase}`, PHASE_NEWS[phase] ?? '', PHASE_BANNER_Y);
 }
 
 /** Конец игры: экран трясётся, телефон вибрирует, звук идёт вниз. */

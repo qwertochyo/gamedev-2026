@@ -92,6 +92,10 @@ const GRID_DOT_COLOR = 0x1e293b;
 const FRAME_COLOR = 0x334155;
 const CARD_COLOR = 0x0f172a;
 const HOLE_COLOR = 0x000000; // нора, из которой выползает змейка
+const ROCK_COLOR = 0x64748b; // камни в мастерской (фаза 3)
+const ROCK_SHADE = 0x334155;
+const ROCK_SHINE = 0xcbd5e1;
+const ROCK_SIZE = 0.82; // камень чуть меньше клетки мастерской
 const DIM_COLOR = 0x020617; // стакан затемнён, пока собирают заказ
 const DIM_ALPHA = 0.6; // блоки видно: пока рисуешь, можно прикинуть, куда ставить
 const TIMER_COLOR = 0x22c55e; // полоска времени: зелёная, к концу краснеет
@@ -341,7 +345,7 @@ function morphFlight(round: Round): number {
   return clamp01((round.morphMs - MORPH_MS * MORPH_CHANGE_PART) / (MORPH_MS * (1 - MORPH_CHANGE_PART)));
 }
 
-/** Этап 1: стакан затемнён, сверху карточка — чертёж заказа, полоска времени, поле с норой и змейкой. */
+/** Этап 1: стакан затемнён, сверху карточка — чертёж заказа, полоска времени, поле с норой, камнями и змейкой. */
 function drawWorkshop(g: Graphics, round: Round, alpha: number): void {
   g.fillStyle(DIM_COLOR, DIM_ALPHA * alpha);
   g.fillRect(FIELD_X, FIELD_Y, FIELD_W, FIELD_H);
@@ -365,10 +369,23 @@ function drawWorkshop(g: Graphics, round: Round, alpha: number): void {
   // нора у верхнего края: отсюда выползает змейка
   g.fillStyle(HOLE_COLOR, alpha);
   g.fillEllipse(WS_X + (WORKSHOP_ENTRY_COL + 0.5) * WS_CELL, WS_Y - 2, WS_CELL * 0.8, 20);
+  for (const rock of round.rocks) drawRock(g, workshopCenter(rock), alpha);
 
   if (round.stage !== 'draw') return; // во время превращения змейку рисует drawMorph
   const cells = snakeVisualCells(round);
   drawSnake(g, cells.map(workshopCenter), WS_CELL, workshopLook(round), (i) => cells[i].row > ENTRY_SHOW_FROM);
+}
+
+/** Камень: серый, с бликом сверху и тенью снизу — сразу видно, что через него не проползти. */
+function drawRock(g: Graphics, p: Point, alpha: number): void {
+  const size = WS_CELL * ROCK_SIZE;
+  const radius = size * 0.3;
+  g.fillStyle(ROCK_SHADE, alpha);
+  g.fillRoundedRect(p.x - size / 2, p.y - size / 2 + 4, size, size - 4, radius);
+  g.fillStyle(ROCK_COLOR, alpha);
+  g.fillRoundedRect(p.x - size / 2, p.y - size / 2, size, size - 6, radius);
+  g.fillStyle(ROCK_SHINE, 0.35 * alpha);
+  g.fillEllipse(p.x - size * 0.16, p.y - size * 0.22, size * 0.34, size * 0.16);
 }
 
 /** Полоска оставшегося времени: left = 1 — время только пошло, 0 — вышло. */

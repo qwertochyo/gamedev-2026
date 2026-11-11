@@ -58,7 +58,7 @@ stateDiagram-v2
   draw --> [*]: фигуре негде появиться — gameOver()
 ```
 
-- **draw** — мастерская 5 × 5. Клетки `snake` — в координатах мастерской. Идёт таймер `drawMsLeft`, стакан стоит.
+- **draw** — мастерская 5 × 5. Клетки `snake` и камни `rocks` (фаза 3) — в координатах мастерской. Идёт таймер `drawMsLeft`, стакан стоит. Правило шага змейки — `canStep()` / `stepSnake()` в `logic.ts`: им же пользуется `canBuild()`, когда проверяет, что при расставленных камнях заказ можно собрать.
 - **morph** — переход на `MORPH_MS`: `draw.ts` рисует превращение по `morphMs`, ввод не действует, стакан стоит.
 - **place** — клетки `snake` — в координатах стакана. Гравитация, сдвиг, поворот, бросок, пауза на опоре.
 
@@ -67,10 +67,10 @@ stateDiagram-v2
 | Что | Файл | Где именно |
 |---|---|---|
 | Ввод | `input.ts` → `game-scene.ts` → `round.ts` | `setupInput()` переводит клавиши в намерения (`KeyIntent`), движение пальца — в направления, сворачивание вкладки — в событие. Что с этим делать, решают `handleKey()`, `handleDir()`, `handleTap()` в сцене. Стрелки уходят в `Round.steer()`: в мастерской шагает голова, в стакане двигается или крутится фигура. Кнопка «II» — `hud.ts` |
-| Состояние игры | `round.ts` + `game-scene.ts` | партия — поля `Round`: `stage`, `grid`, `snake`, `orders`, `score`, `lines`, `level`, `phase`, таймеры `drawMsLeft`, `morphMs`, `fallTimer`, `restMs`, флаг `isOver`. Сцена — `isStarted`, `isPaused`, `canRestart`, `bestScore`. Очки, линии, уровень и фазу меняет только `addProgress()` |
+| Состояние игры | `round.ts` + `game-scene.ts` | партия — поля `Round`: `stage`, `grid`, `snake`, `rocks`, `orders`, `score`, `lines`, `level`, `phase`, таймеры `drawMsLeft`, `morphMs`, `fallTimer`, `restMs`, флаг `isOver`. Сцена — `isStarted`, `isPaused`, `canRestart`, `bestScore`. Очки, линии, уровень и фазу меняет только `addProgress()` |
 | Результат — конец игры | `round.ts` → `game-scene.ts` | `Round.gameOver()` зовут `tickDrawing()` («Время вышло!») и `finishDrawing()` («Стакан полон!»). Партия сообщает событием `onGameOver`, а `gameOver()` в сцене сохраняет рекорд (`storage.ts`), включает тряску и звук (`effects.ts`) и показывает карточку (`ui.ts`) |
 | Перезапуск | `game-scene.ts` | `restart()` → `scene.restart({ skipIntro: true })` → `create()`: новая партия `new Round()` и сброс флагов сцены |
-| Сложность, появление, правила | `logic.ts` + `round.ts` | настройки в начале `logic.ts`: скорость падения, время на заказ, мастерская, линии на уровень, очки, длительность превращения, порог и параметры фаз. Формулы — `fallMsForLevel()`, `drawMsForLevel()`, `levelForLines()`, `scoreForLines()`, `phaseForScore()`, `phaseParams()`. Фигуры и их узнавание — `SHAPES`, `shapeOf()`; поворот — `rotateAround()`. Появление фигуры — `pieceAtTop()` в `round.ts` и `spawnLeft()` |
+| Сложность, появление, правила | `logic.ts` + `round.ts` | настройки в начале `logic.ts`: скорость падения, время на заказ, мастерская, линии на уровень, очки, длительность превращения, пороги и параметры фаз (в фазе 3 — `workshopRocks`). Формулы — `fallMsForLevel()`, `drawMsForLevel()`, `levelForLines()`, `scoreForLines()`, `phaseForScore()`, `phaseParams()`. Фигуры и их узнавание — `SHAPES`, `shapeOf()`; поворот — `rotateAround()`. Появление фигуры — `pieceAtTop()` в `round.ts` и `spawnLeft()` |
 
 ## Время
 

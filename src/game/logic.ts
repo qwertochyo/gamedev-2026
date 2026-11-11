@@ -34,17 +34,23 @@ export const DRAW_MS_MIN = 4000;
 // Переход между этапами: змейка превращается в фигуру и опускается в стакан. Игра в это время ждёт
 export const MORPH_MS = 700;
 
-// Фазы. Правила в обеих одинаковые — с ростом очков меняются только параметры.
-// Уровни (по линиям) меняют скорость падения и время на заказ, фазы (по очкам) — застывание и время на заказ.
-export const PHASE_2_AT_SCORE = 1000; // фаза 2 с 1000 очков (примерно 5–10 линий)
+// Фазы по очкам. Фаза 2 меняет только параметры. Фаза 3 добавляет одно новое правило — камни в мастерской.
+// Уровни (по линиям) меняют скорость падения и время на заказ.
+// Пороги низкие, чтобы за обычный плейтест (3–5 минут) игрок увидел все фазы. Оценка: за фигуру ~20 очков
+// за заказ и ~30 за линии, фигура — ~10 с
+export const PHASE_2_AT_SCORE = 250; // фаза 2 — примерно через 1–1,5 минуты
+export const PHASE_3_AT_SCORE = 450; // фаза 3 — примерно через 2–3 минуты
+export const MAX_BUILD_STEPS = 10; // камни ставятся только так, чтобы заказ собирался не больше чем за 10 шагов
 
 export interface PhaseParams {
   lockDelayMs: number; // сколько фигура стоит на опоре, прежде чем застыть
   drawTimeFactor: number; // во сколько раз меньше времени на заказ, чем по уровню
+  workshopRocks: number; // сколько камней в мастерской: змейка их обползает
 }
 
-const PHASE_1: PhaseParams = { lockDelayMs: 600, drawTimeFactor: 1 };
-const PHASE_2: PhaseParams = { lockDelayMs: 350, drawTimeFactor: 0.75 };
+const PHASE_1: PhaseParams = { lockDelayMs: 600, drawTimeFactor: 1, workshopRocks: 0 };
+const PHASE_2: PhaseParams = { lockDelayMs: 350, drawTimeFactor: 0.75, workshopRocks: 0 };
+const PHASE_3: PhaseParams = { lockDelayMs: 350, drawTimeFactor: 0.75, workshopRocks: 3 };
 
 export function createGrid(): Grid {
   return Array.from({ length: ROWS }, () => createEmptyRow());
@@ -107,13 +113,15 @@ export function levelForLines(lines: number): number {
   return 1 + Math.floor(lines / LINES_PER_LEVEL);
 }
 
-/** Номер фазы по очкам: 1 или 2. */
+/** Номер фазы по очкам: 1, 2 или 3. */
 export function phaseForScore(score: number): number {
-  return score < PHASE_2_AT_SCORE ? 1 : 2;
+  if (score >= PHASE_3_AT_SCORE) return 3;
+  return score >= PHASE_2_AT_SCORE ? 2 : 1;
 }
 
 export function phaseParams(phase: number): PhaseParams {
-  return phase === 1 ? PHASE_1 : PHASE_2;
+  if (phase === 3) return PHASE_3;
+  return phase === 2 ? PHASE_2 : PHASE_1;
 }
 
 export function fallMsForLevel(level: number): number {
@@ -210,10 +218,93 @@ export function turnClockwise(dir: Dir): Dir {
 
 /** «Мешок» заказов, как в тетрисе: все фигуры по разу в случайном порядке. */
 export function shuffledBag(): ShapeId[] {
-  const bag = [...SHAPE_IDS];
-  for (let i = bag.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [bag[i], bag[j]] = [bag[j], bag[i]];
+  return shuffled(SHAPE_IDS);
+}
+
+// ---------- мастерская: шаг змейки и камни ----------
+// Правило шага общее для игры (Round.moveHead) и для проверки, можно ли собрать заказ при этих камнях.
+
+/** Новая змейка: голова в верхней клетке мастерской, тело выше — ещё в норе. */
+export function startSnake(): Cell[] {
+  return Array.from({ length: SNAKE_LENGTH }, (_, i) => ({ col: WORKSHOP_ENTRY_COL, row: -i }));
+}
+
+/** Может ли голова шагнуть в сторону dir: не назад в шею, не за край, не в камень, не в себя (хвост уходит). */
+export function canStep(snake: Cell[], dir: Dir, lastDir: Dir, rocks: Cell[]): boolean {
+  if (isOpposite(dir, lastDir)) return false;
+  const next = move(snake[0], dir);
+  const isTaken = (cells: Cell[]): boolean => cells.some((cell) => cell.col === next.col && cell.row === next.row);
+  return isInWorkshop(next) && !isTaken(rocks) && !isTaken(snake.slice(0, -1));
+}
+
+/** Шаг: голова в соседнюю клетку, тело тянется следом. */
+export function stepSnake(snake: Cell[], dir: Dir): Cell[] {
+  return [move(snake[0], dir), ...snake.slice(0, -1)];
+}
+
+/** Заказ собран: змейка целиком в мастерской и совпала с заказом (в любом повороте). */
+export function isOrderBuilt(snake: Cell[], order: ShapeId): boolean {
+  return snake.every(isInWorkshop) && shapeOf(snake) === order;
+}
+
+const ALL_DIRS: Dir[] = ['left', 'right', 'up', 'down'];
+
+/** Можно ли собрать заказ из новой змейки при этих камнях не больше чем за MAX_BUILD_STEPS шагов (перебор в ширину). */
+export function canBuild(order: ShapeId, rocks: Cell[]): boolean {
+  const key = (snake: Cell[], dir: Dir): string => snake.map((c) => `${c.col},${c.row}`).join(' ') + dir;
+  let layer: { snake: Cell[]; dir: Dir }[] = [{ snake: startSnake(), dir: 'down' }];
+  const seen = new Set([key(layer[0].snake, 'down')]);
+  for (let steps = 0; steps < MAX_BUILD_STEPS; steps++) {
+    const next: { snake: Cell[]; dir: Dir }[] = [];
+    for (const { snake, dir } of layer) {
+      for (const d of ALL_DIRS) {
+        if (!canStep(snake, d, dir, rocks)) continue;
+        const moved = stepSnake(snake, d);
+        if (isOrderBuilt(moved, order)) return true;
+        if (seen.has(key(moved, d))) continue;
+        seen.add(key(moved, d));
+        next.push({ snake: moved, dir: d });
+      }
+    }
+    layer = next;
   }
-  return bag;
+  return false;
+}
+
+const ROCK_TRIES = 50; // столько раз пробуем расставить камни, прежде чем сдаться и обойтись без них
+const ROCK_ROWS = 3; // камни — в верхних рядах мастерской, где начинается любой путь змейки
+
+/**
+ * Камни для заказа. Один всегда рядом с головой новой змейки — первый шаг уже не сделать «на автомате»,
+ * остальные — в верхних рядах. Случайные камни по всему полю почти никогда не мешали (замер: путь
+ * длиннее лишь на 0–0,4 шага), а так они перекрывают в среднем ~60% коротких путей к заказу.
+ * Расстановку, при которой заказ не собрать за MAX_BUILD_STEPS шагов, отбрасываем и пробуем другую.
+ */
+export function placeRocks(order: ShapeId, count: number): Cell[] {
+  if (count === 0) return [];
+  const head = startSnake()[0];
+  const nearHead = ALL_DIRS.map((dir) => move(head, dir)).filter(isInWorkshop);
+  const top: Cell[] = [];
+  for (let row = 0; row < ROCK_ROWS; row++) {
+    for (let col = 0; col < WORKSHOP_SIZE; col++) {
+      if (col !== head.col || row !== head.row) top.push({ col, row });
+    }
+  }
+  for (let attempt = 0; attempt < ROCK_TRIES; attempt++) {
+    const first = shuffled(nearHead)[0];
+    const rest = shuffled(top.filter((cell) => cell.col !== first.col || cell.row !== first.row)).slice(0, count - 1);
+    const rocks = [first, ...rest];
+    if (canBuild(order, rocks)) return rocks;
+  }
+  return [];
+}
+
+/** Те же элементы в случайном порядке (тасование Фишера — Йетса). */
+function shuffled<T>(items: T[]): T[] {
+  const copy = [...items];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
 }

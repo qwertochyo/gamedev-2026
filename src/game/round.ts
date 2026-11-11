@@ -2,7 +2,8 @@
 // Без Phaser — только данные и правила. Наружу партия сообщает событиями (RoundEvents).
 //
 // Каждая фигура проходит три этапа:
-// 1) 'draw'  — мастерская 5×5: змейка ползает без гравитации и собирает заказ, пока идёт таймер;
+// 1) 'draw'  — мастерская 5×5: змейка ползает без гравитации и собирает заказ, пока идёт таймер
+//              (в фазе 3 в мастерской камни, их нужно обползать);
 // 2) 'morph' — змейка превращается в фигуру и опускается в стакан (MORPH_MS, игра ждёт);
 // 3) 'place' — фигура падает в стакане сверху по центру; её двигают, крутят и роняют.
 
@@ -12,25 +13,25 @@ import {
   ORDER_BONUS,
   ROTATE_KICKS,
   ROTATE_PIVOT_INDEX,
-  SNAKE_LENGTH,
-  WORKSHOP_ENTRY_COL,
+  canStep,
   clearFullRows,
   createGrid,
   drawMsForLevel,
   fallMsForLevel,
   findFullRows,
   isFree,
-  isInWorkshop,
-  isOpposite,
+  isOrderBuilt,
   levelForLines,
   move,
   phaseForScore,
   phaseParams,
+  placeRocks,
   rotateAround,
   scoreForLines,
-  shapeOf,
   shuffledBag,
   spawnLeft,
+  startSnake,
+  stepSnake,
   turnClockwise,
   type Cell,
   type Dir,
@@ -81,6 +82,7 @@ export class Round {
   drawMsLeft = 0; // сколько из него осталось
   morphMs = 0; // сколько мс идёт превращение
   spawnCells: Cell[] = []; // где собранная фигура появится в стакане
+  rocks: Cell[] = []; // камни в мастерской (фаза 3), в координатах мастерской
   fallMs = fallMsForLevel(1);
   fallTimer = 0;
   isResting = false; // фигура легла на опору и ждёт: её ещё можно сдвинуть или повернуть
@@ -114,7 +116,8 @@ export class Round {
     if (this.stage === 'morph') return this.tickMorph(dt);
 
     this.fallTimer += dt;
-    while (this.fallTimer >= this.currentFallMs() && !this.isOver) {
+    // Фигура могла застыть посреди цикла — тогда уже идёт мастерская, и падать нечему
+    while (this.fallTimer >= this.currentFallMs() && !this.isOver && this.stage === 'place') {
       this.fallTimer -= this.currentFallMs();
       this.fall();
     }
@@ -160,6 +163,7 @@ export class Round {
 
   /** Куда упадёт фигура, если уронить её сейчас, — для контура в стакане. */
   landingCells(): Cell[] {
+    if (this.snake.length === 0) return []; // пустую фигуру «ронять» бесконечно
     let cells = this.snake;
     while (cells.every((cell) => isFree(this.grid, { col: cell.col, row: cell.row + 1 }))) {
       cells = cells.map((cell) => ({ col: cell.col, row: cell.row + 1 }));
@@ -178,8 +182,8 @@ export class Round {
     this.isDropping = false;
     this.drawMs = drawMsForLevel(this.level) * this.params().drawTimeFactor;
     this.drawMsLeft = this.drawMs;
-    // Голова в верхней клетке мастерской, тело выше — ещё во входе
-    this.snake = Array.from({ length: SNAKE_LENGTH }, (_, i) => ({ col: WORKSHOP_ENTRY_COL, row: -i }));
+    this.rocks = placeRocks(this.order(), this.params().workshopRocks); // на каждый заказ — новые места
+    this.snake = startSnake();
     this.prevSnake = this.snake.map((cell) => ({ ...cell }));
     this.moveAge = 0;
   }
@@ -191,25 +195,11 @@ export class Round {
 
   /** Голова шагает в сторону dir, тело тянется следом. Собрала заказ — фигура уходит в стакан. */
   private moveHead(dir: Dir): void {
-    if (isOpposite(dir, this.dir)) return; // назад, в шею, нельзя
-    const next = move(this.snake[0], dir);
-    if (!isInWorkshop(next) || this.isOwnCell(next)) return;
-
+    if (!canStep(this.snake, dir, this.dir, this.rocks)) return; // в шею, за край, в камень или в себя нельзя
     this.remember();
-    this.snake.unshift(next); // голова шагает,
-    this.snake.pop(); // хвост подтягивается
+    this.snake = stepSnake(this.snake, dir);
     this.dir = dir;
-    if (this.isOrderReady()) this.finishDrawing();
-  }
-
-  /** Змейка целиком в мастерской и совпала с заказом (в любом повороте). */
-  private isOrderReady(): boolean {
-    return this.snake.every(isInWorkshop) && shapeOf(this.snake) === this.order();
-  }
-
-  private isOwnCell(target: Cell): boolean {
-    // хвост в этот же момент уходит, поэтому его клетку не считаем
-    return this.snake.slice(0, -1).some((cell) => cell.col === target.col && cell.row === target.row);
+    if (isOrderBuilt(this.snake, this.order())) this.finishDrawing();
   }
 
   /** Заказ собран: +очки, змейка начинает превращаться в фигуру. Места в стакане нет — конец. */
